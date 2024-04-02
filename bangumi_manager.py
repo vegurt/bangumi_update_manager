@@ -334,7 +334,7 @@ class bangumi:
 
     def download(self):
         for ep in self.tolist():
-            if ep.status == 'updating':
+            if ep.isnew:
                 ep.download()
 
     def turnold(self):
