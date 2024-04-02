@@ -199,7 +199,7 @@ class episode:
     def turn_old(self):
         self.isnew=False
 
-    def download(self):
+    def download(self,path=None):
         if not self.content is None:
             res = self.content
         else:
@@ -215,18 +215,26 @@ class episode:
                     self.content=res
                     break
         if res:
+            if path:
+                pathname=os.path.abspath(path)
+            else:
+                if len(argv)>1:
+                    pathname=os.path.abspath(os.path.split(argv[1])[0])
+                else:
+                    pathname=os.path.abspath(os.getcwd)
+                pathname=os.path.join(pathname,'torrents')
+            if not os.path.exists(pathname):
+                os.makedirs(pathname)
             name = ''.join(self.name.splitlines())
             name=re.sub(r'[\\/:*?"<>|]', ' ', name)
-            if not os.path.exists('torrents'):
-                os.mkdir('torrents')
-            path = f'.\\torrents\\{name}.torrent'
-            if os.path.exists(path):
+            fullpath=os.path.join(pathname,f'{name}.torrent')
+            if os.path.exists(fullpath):
                 counter=itertools.count(2)
                 for i in counter:
-                    path = f'.\\torrents\\{name} {i}.torrent'
-                    if not os.path.exists(path):
+                    fullpath=os.path.join(pathname,f'{name} {i}.torrent')
+                    if not os.path.exists(fullpath):
                         break
-            with open(path,'wb') as f:
+            with open(fullpath,'wb') as f:
                 f.write(res)
             self.turn_old()
             print('成功！！')
