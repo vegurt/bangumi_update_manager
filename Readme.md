@@ -23,7 +23,7 @@
 
 ## 准备
 
-安装 Python3.11，运行以下命令：
+安装 [Python3.11](https://www.python.org/downloads/windows/)，运行以下命令：
 
 ```cmd
 pip install -i https://mirror.baidu.com/pypi/simple/ pyperclip requests lxml rich
