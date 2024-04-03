@@ -41,6 +41,9 @@ class RssSource:
             'http://3.kisssub.net/rss{key}.xml',
             'http://1.comicat.org/rss{key}.xml',
             'http://www.miobt.com/rss{key}.xml',
+            'https://share.acgnx.se/rss.xml{key}',
+            'https://share.dmhy.org/topics/rss/rss.xml{key}',
+            # 动漫花园的磁力链接有点怪，有点短，再看看研究研究
             # 'gg.al',
             # 'comicat.122000.xyz',
         ]
@@ -68,10 +71,10 @@ class RssSource:
             
 
     def rsslink(self,keys:list):
-        if keys:
-            keys='-'+'+'.join(' '.join(keys).split())
+        if self.source.startswith('https://share'):
+            keys='?keyword='+'+'.join(' '.join(keys).split()) if keys else ''
         else:
-            keys=''
+            keys='-'+'+'.join(' '.join(keys).split()) if keys else ''
         return self.source.replace('{key}',keys)
 
     def download(self,keys):
@@ -177,24 +180,27 @@ class episode:
 
     @property
     def hash(self):
-        hash = re.match('https?://(?:.*)/show-([0-9a-zA-Z]*)\\.html',self.source)
+        hash = re.search(r'[\d\w]{35}[\d\w]+',self.downloadurl) # 我记得种子哈希值有37位的，有40位的
         if hash:
-            return hash.group(1)
+            return hash.group(0)
 
     @property
     def torrentlink(self):
-        if self.downloadurl:
+        if self.downloadurl.startswith('magnet'):
+            hash = self.hash
+            if hash:
+                return episode.hash2torrent(hash)
+        else:
+            return self.downloadurl
+
+    @property
+    def magnetlink(self):
+        if self.downloadurl.startswith('magnet'):
             return self.downloadurl
         else:
             hash = self.hash
             if hash:
-                return episode.hash2torrent(hash)
-
-    @property
-    def magnetlink(self):
-        hash = self.hash
-        if hash:
-            return episode.hash2magnet(hash)
+                return episode.hash2magnet(hash)
 
     def turn_old(self):
         self.isnew=False
@@ -261,7 +267,7 @@ class bangumi:
         for ptn,begin in self.patterns:
             if begin not in indexes:
                 indexes.append(begin)
-        searcher=[bangumi('searcher',self.keys+[str(i+index-1).rjust(2,'0')],['.*']) for i in indexes]
+        searcher=[bangumi('searcher',self.keys+[str(i+index-1).rjust(2,'0')],[['.*',1]]) for i in indexes]
         
         res_rough=[]
         print(f'共{len(searcher)}个搜索任务')
@@ -624,8 +630,14 @@ def update_all(filt=True,num=None):
 def download_all(filt=True,num=None):
     tmp = collect(filt,num)
     if tmp:
-        s = len(tmp)
-        for i,ep in enumerate(tmp,1):
+        todo = [ep for ep in tmp if ep.torrentlink]
+        tocopy = [ep for ep in tmp if not ep.torrentlink and ep.magnetlink]
+        if tocopy:
+            print(f'{len(tocopy)} 个项目因未找到种子链接，已复制磁力链接，下载完成需手动标记为旧项目')
+            magnetlinks='\n'.join([ep.magnetlink for ep in tocopy])
+            pyperclip.copy(magnetlinks)
+        s = len(todo)
+        for i,ep in enumerate(todo,1):
             print(f'正在下载：第{i}个，共{s}个')
             ep.show()
             ep.download()
@@ -634,14 +646,16 @@ def download_all(filt=True,num=None):
         print('未发现项目')    
 
 def auto_download():
-    print('开始更新...')
-    update_all()
-    print('发现新项目：')
-    tree()
-    print('开始下载...')
-    download_all()
     if sourcedata.contains:
+        print('开始更新...')
+        update_all()
+        print('发现新项目：')
+        tree()
+        print('开始下载...')
+        download_all()
         save()
+    else:
+        print('请先添加番剧')
 
 def add_bangumi(name):
     layer,target=selected()
@@ -695,6 +709,17 @@ def setkeys(keys):
         target.keys=keys.split()
     else:
         print('请在番剧中使用该命令')
+
+def setRSS(num):
+    bangumi.rss.switch_source(num-1)
+    showRSS()
+
+def listRSS():
+    for i,rss in enumerate(bangumi.rss.sources,1):
+        print(f'{i} {rss}')
+
+def showRSS():
+    print(f'using RSS {bangumi.rss.source}')
 
 def showlist(num=None):
     layer,target=selected(num)
@@ -765,6 +790,12 @@ setname 名字
   为项目命名 适用于：主页
 setkeys keys
   设置番剧关键词 适用于：番剧
+listrss
+  查看RSS源列表
+setrss num
+  设置当前使用的RSS源
+showrss
+  查看当前使用的RSS源
 save
   保存项目
 export
@@ -821,6 +852,12 @@ while True:
             setname(paras)
         elif command == 'setkeys':
             setkeys(paras)
+        elif command == 'listrss':
+            listRSS()
+        elif command == 'setrss':
+            setRSS(int(paras))
+        elif command == 'showrss':
+            showRSS()
         elif command == 'save':
             save()
         elif command == 'export':
