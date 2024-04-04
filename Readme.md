@@ -189,8 +189,27 @@ show 不可在主页中使用，而 list 不可在剧集中使用
 
 ## 添加项目 `add`
 
+**用法：**
 
-在主页中为添加番剧，在番剧中为添加过滤器
+```cmd
+add bangumi_name|pattern
+```
+
+**适用范围：主页，番剧**
+
+在主页中添加番剧，在番剧中添加过滤器
+
+## 刷新 `refresh`
+
+**用法：**
+
+```cmd
+refresh [num]
+```
+
+**适用范围：主页，番剧**
+
+将剧集重新过滤整理，在过滤器有所改动时使用
 
 ## 标记 `mark`
 
@@ -261,6 +280,23 @@ update [all] [idx]
 
 默认只更新正在更新的番剧，使用 all 选项无视
 
+## RSS源 `listrss`|`setrss`|`showrss`
+
+**用法：**
+
+```cmd
+listrss
+setrss [idx]
+showrss
+```
+
+**适用范围：主页，番剧，剧集**
+
+listrss 查看 RSS 列表
+
+setrss 切换 RSS
+
+showrss 查看当前使用的RSS
 
 ## 下载 `download`
 
@@ -355,6 +391,8 @@ idx 一看就知道是需要替换的集数了，但这个集数应从1开始算
 - **property:** bangumiset.html
 
   导出为 html 格式
+
+本程序假设 enclosure 链接要么是磁力链接，要么是种子文件下载直链，哈希值要么在 enclosure 链接中，要么在 link 中。若是新 RSS 符合假设，只需改动前面两项。
 
 # 展望
 

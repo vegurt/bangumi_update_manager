@@ -22,28 +22,28 @@ class RssSource:
     'RSS订阅与文件下载'
     def __init__(self) -> None:
         self.sources=[
-            'http://kisssub.org/rss{key}.xml',
-            'http://comicat.org/rss{key}.xml',
-            'http://1.kisssub.115000.xyz/rss{key}.xml',
-            'http://2.kisssub.115000.xyz/rss{key}.xml',
-            'http://3.kisssub.115000.xyz/rss{key}.xml',
-            'http://4.kisssub.115000.xyz/rss{key}.xml',
-            'http://5.kisssub.115000.xyz/rss{key}.xml',
-            'http://1.comicat.122000.xyz/rss{key}.xml',
-            'http://2.comicat.122000.xyz/rss{key}.xml',
-            'http://3.comicat.122000.xyz/rss{key}.xml',
-            'http://4.comicat.122000.xyz/rss{key}.xml',
-            'http://5.comicat.122000.xyz/rss{key}.xml',
-            'http://1.kisssub.org/rss{key}.xml',
-            'http://2.kisssub.org/rss{key}.xml',
-            'http://3.kisssub.org/rss{key}.xml',
-            'http://2.kisssub.net/rss{key}.xml',
-            'http://3.kisssub.net/rss{key}.xml',
-            'http://1.comicat.org/rss{key}.xml',
-            'http://www.miobt.com/rss{key}.xml',
-            'https://share.acgnx.se/rss.xml{key}',
-            'https://share.dmhy.org/topics/rss/rss.xml{key}',
-            # 动漫花园的磁力链接有点怪，有点短，再看看研究研究
+            ('爱恋动漫 主站','http://kisssub.org/rss{key}.xml'),
+            ('漫猫动漫 主站','http://comicat.org/rss{key}.xml'),
+            ('爱恋动漫 站点1','http://1.kisssub.115000.xyz/rss{key}.xml'),
+            ('爱恋动漫 站点2','http://2.kisssub.115000.xyz/rss{key}.xml'),
+            ('爱恋动漫 站点3','http://3.kisssub.115000.xyz/rss{key}.xml'),
+            ('爱恋动漫 站点4','http://4.kisssub.115000.xyz/rss{key}.xml'),
+            ('爱恋动漫 站点5','http://5.kisssub.115000.xyz/rss{key}.xml'),
+            ('漫猫动漫 站点1','http://1.comicat.122000.xyz/rss{key}.xml'),
+            ('漫猫动漫 站点2','http://2.comicat.122000.xyz/rss{key}.xml'),
+            ('漫猫动漫 站点3','http://3.comicat.122000.xyz/rss{key}.xml'),
+            ('漫猫动漫 站点4','http://4.comicat.122000.xyz/rss{key}.xml'),
+            ('漫猫动漫 站点5','http://5.comicat.122000.xyz/rss{key}.xml'),
+            ('爱恋动漫 站点6','http://1.kisssub.org/rss{key}.xml'),
+            ('爱恋动漫 站点7','http://2.kisssub.org/rss{key}.xml'),
+            ('爱恋动漫 站点8','http://3.kisssub.org/rss{key}.xml'),
+            ('爱恋动漫 站点9','http://2.kisssub.net/rss{key}.xml'),
+            ('爱恋动漫 站点10','http://3.kisssub.net/rss{key}.xml'),
+            ('漫猫动漫','http://1.comicat.org/rss{key}.xml'),
+            ('喵喵喵','http://www.miobt.com/rss{key}.xml'),
+            ('末日动漫','https://share.acgnx.se/rss.xml{key}'),
+            ('动漫花园','https://share.dmhy.org/topics/rss/rss.xml{key}'),
+            # 动漫花园的磁力链接有点怪，哈希有点短，没法直接下载种子文件，再看看研究研究
             # 'gg.al',
             # 'comicat.122000.xyz',
         ]
@@ -53,13 +53,11 @@ class RssSource:
     
     @property
     def source(self):
-        return self.sources[self.index]
-
-    def addsources(self,sources):
-        if isinstance(sources,list):
-            self.sources.extend(sources)
-        elif isinstance(sources,str):
-            self.sources.append(sources)
+        return self.sources[self.index][1]
+    
+    @property
+    def name(self):
+        return self.sources[self.index][0]
     
     def switch_source(self,num=None):
         if num is None:
@@ -79,12 +77,12 @@ class RssSource:
 
     def download(self,keys):
         for i in range(len(self.sources)):
-            t = '主站点' if self.index == 0 else f'备用站点{self.index}'
-            print(f'正在使用 {t}')
+            print(f'正在使用 {self.name}')
+            link = self.rsslink(keys)
             for j in range(self.retry_times):
                 try:
                     print(f'第{j+1}次尝试：',end='')
-                    res=download(self.rsslink(keys))
+                    res=download(link)
                 except Exception:
                     print('失败。。。')
                 else:
@@ -180,7 +178,8 @@ class episode:
 
     @property
     def hash(self):
-        hash = re.search(r'[\d\w]{35}[\d\w]+',self.downloadurl) # 我记得种子哈希值有37位的，有40位的
+        pattern=re.compile(r'[\d\w]{30}[\d\w]+')
+        hash = pattern.search(self.downloadurl) or pattern.search(self.source) # 我记得种子哈希值有37位的，有40位的
         if hash:
             return hash.group(0)
 
@@ -188,7 +187,7 @@ class episode:
     def torrentlink(self):
         if self.downloadurl.startswith('magnet'):
             hash = self.hash
-            if hash:
+            if hash and len(hash)>35:
                 return episode.hash2torrent(hash)
         else:
             return self.downloadurl
@@ -262,6 +261,13 @@ class bangumi:
         res.extend(self.contains[0])
         return res
 
+    def refresh(self):
+        l = self.tolist()
+        self.contains.clear()
+        self.contains[0]=[]
+        for ep in l:
+            self.add(ep)
+
     def search(self,index):
         indexes=[]
         for ptn,begin in self.patterns:
@@ -305,7 +311,7 @@ class bangumi:
         t = '(有更新) ' if self.hasnew() else ''
         cs.out(f'{t}',style='red',end='')
         print(self.name)
-        if self.contains:
+        if self.tolist():
             l=self.last
             d=l.dayspast
             style = 'white'
@@ -332,7 +338,9 @@ class bangumi:
     
     @property
     def last(self):
-        return sorted(self.tolist(),key=lambda ep:ep.date)[-1]
+        l=self.tolist()
+        if l:
+            return sorted(l,key=lambda ep:ep.date)[-1]
 
     def __iter__(self):
         return iter(self.tolist())
@@ -587,7 +595,13 @@ def turn_all(status):
 
 def copy_all(filt=True,num=None):
     tmp = collect(filt,num)
-    text='\n'.join([ep.magnetlink for ep in tmp])
+    links = [ep.magnetlink for ep in tmp]
+    if not all(links):
+        rest = [ep for link,ep in zip(links,tmp) if not link]
+        print(f'警告！{len(rest)} 个项目找不到磁力链接')
+        for ep in rest:
+            print(ep.name)
+    text='\n'.join([i for i in links if i])
     pyperclip.copy(text)
     
 def tree(filt=True):
@@ -603,6 +617,21 @@ def tree(filt=True):
             print()
     else:
         print('未发现项目')
+
+def refresh(num=None):
+    layer,target=selected(num)
+    toprocess=[]
+    if layer == 0:
+        toprocess.extend(target.contains)
+    elif layer == 1:
+        toprocess.append(target)
+    else:
+        print('该命令不适用于剧集')
+        return
+    toprocess=[bm for bm in toprocess if bm.name and bm.patterns]
+    for bm in toprocess:
+        bm.refresh()
+    
 
 def update_all(filt=True,num=None):
     layer,target=selected(num)
@@ -630,12 +659,21 @@ def update_all(filt=True,num=None):
 def download_all(filt=True,num=None):
     tmp = collect(filt,num)
     if tmp:
+        print(f'共找到 {len(tmp)} 个项目')
         todo = [ep for ep in tmp if ep.torrentlink]
         tocopy = [ep for ep in tmp if not ep.torrentlink and ep.magnetlink]
         if tocopy:
-            print(f'{len(tocopy)} 个项目因未找到种子链接，已复制磁力链接，下载完成需手动标记为旧项目')
+            print(f'{len(tocopy)} 个项目因未找到种子链接，已为您复制磁力链接，下载完成需手动标记为旧项目')
+            for ep in tocopy:
+                print(ep.name)
             magnetlinks='\n'.join([ep.magnetlink for ep in tocopy])
             pyperclip.copy(magnetlinks)
+        rest = len(tmp) - len(todo) - len(tocopy)
+        if rest > 0:
+            print(f'警告！{rest} 个项目无法下载！')
+            rest = [ep for ep in tmp if not ep.torrentlink and not ep.magnetlink]
+            for ep in rest:
+                print(ep.name)
         s = len(todo)
         for i,ep in enumerate(todo,1):
             print(f'正在下载：第{i}个，共{s}个')
@@ -715,11 +753,11 @@ def setRSS(num):
     showRSS()
 
 def listRSS():
-    for i,rss in enumerate(bangumi.rss.sources,1):
+    for i,rss in enumerate([name for name,link in bangumi.rss.sources],1):
         print(f'{i} {rss}')
 
 def showRSS():
-    print(f'using RSS {bangumi.rss.source}')
+    print(f'using RSS {bangumi.rss.name}')
 
 def showlist(num=None):
     layer,target=selected(num)
@@ -806,7 +844,9 @@ mark old|new|updating|end|abandoned|pause
 copy [all] [num]
   复制磁力链接
 tree [new]
-  以树的形式显示
+  以树的形式显示，使用参数 new 只显示新项目
+refresh [num]
+  重新过滤整理剧集 适用于：主页，番剧
 update [all]  [num]
   更新番剧列表 适用于：主页，番剧
 download [all] [num]
@@ -821,13 +861,17 @@ help
   帮助
 ''')
 
-sourcedata=bangumiset()
+def load_from_file(filepath):
+    with open(filepath,'rt',encoding='utf8') as f:
+        sourcedata=bangumiset.fromxml(etree.fromstring(f.read()))
+    return sourcedata
+
 index=[]
 
 if len(argv)>1:
-    with open(argv[1],'rt',encoding='utf8') as f:
-        sourcedata=bangumiset.fromxml(etree.fromstring(f.read()))
-
+    sourcedata=load_from_file(argv[1])
+else:
+    sourcedata=bangumiset()
 
 while True:
     try:
@@ -875,6 +919,8 @@ while True:
             copy_all(p1,p2)
         elif command == 'tree':
             tree(paras=='new')
+        elif command=='refresh':
+            refresh(int(paras) if paras else None)
         elif command == 'update':
             p1='all' not in paras
             p2=re.search('\\d+',paras)
@@ -902,9 +948,16 @@ while True:
             doc()
         else:
             print('你要干什么呢？啊~不要~')
-    except Exception:
+    except KeyboardInterrupt:
+        print('555，你知道干得正起劲突然被打断是什么感觉吗？')
+    except Exception as e:
         print('粗错啦~~')
+        # print(e)
+    finally:
+        refresh()
+        save()
 
 if sourcedata.contains:
+    refresh()
     save()
 
