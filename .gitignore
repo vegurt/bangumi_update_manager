@@ -1,4 +1,10 @@
+build
+dist
+releases
+venv
 torrents
 *test*
 *.xml
 *.html
+*.spec
+*.exe

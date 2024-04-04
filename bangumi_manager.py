@@ -954,10 +954,7 @@ while True:
         print('粗错啦~~')
         # print(e)
     finally:
-        refresh()
-        save()
-
-if sourcedata.contains:
-    refresh()
-    save()
+        if sourcedata.contains:
+            refresh()
+            save()
 
