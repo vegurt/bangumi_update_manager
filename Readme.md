@@ -380,37 +380,9 @@ idx 一看就知道是需要替换的集数了，但这个集数应从1开始算
 
 # 添加RSS源
 
-本程序提供的源已经够用，但若还想添加其他源，可关注和修改以下内容：
+本程序提供的源已经够用，但若还想添加其他源，可在 RssSource.sources （包含 RSS 链接生成方法的 RSS 源列表）中添加 RSS。
 
-- **property:** RssSource.sources
-
-  字符串形式存储的可解析的 RSS 源的使用方法
-  
-- **method:** RssSource.rsslink
-
-  结合 RSS 使用方法，用关键词列表生成的搜索链接
-
-- **method:** episode.fromrss
-
-  从 RSS 源的单个 item 导入为单个剧集
-
-- **property:** episode.hash
-
-  可以是 torrent 的哈希值，也可以是其他值，是比较剧集是否相同的重要属性。
-
-- **method:** episode.download
-
-  下载剧集。
-
-- **method:** bangumi.updatefromrss
-
-  从 RSS 源更新番剧
-
-- **property:** bangumiset.html
-
-  导出为 html 格式
-
-本程序假设 enclosure 链接要么是磁力链接，要么是种子文件下载直链，哈希值要么在 enclosure 链接中，要么在 link 中。若是新 RSS 符合假设，只需改动前面两项。
+> 本程序假设 enclosure 链接要么是磁力链接，要么是种子文件下载直链，哈希值要么在 enclosure 链接中，要么在 link 中。
 
 # 展望
 

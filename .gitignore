@@ -8,3 +8,5 @@ torrents
 *.html
 *.spec
 *.exe
+*.bat
+*.txt

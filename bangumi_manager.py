@@ -18,31 +18,43 @@ def download(url):
     res.close()
     return res
 
+class RssGenerator:
+    def __init__(self,name,func,source=None) -> None:
+        self.name = name
+        self.source = source
+        self.func=func # 一个参数为RSS源和关键词列表，输出为RSS链接的函数
+
+    def toRss(self,keys):
+        return self.func(self.source,keys)
+
+
 class RssSource:
     'RSS订阅与文件下载'
     def __init__(self) -> None:
+        func1 = lambda source,keys:source.replace('{key}','-'+'+'.join(' '.join(keys).split()) if keys else '')
+        func2 = lambda source,keys:source.replace('{key}','?keyword='+'+'.join(' '.join(keys).split()) if keys else '')
         self.sources=[
-            ('爱恋动漫 主站','http://kisssub.org/rss{key}.xml'),
-            ('漫猫动漫 主站','http://comicat.org/rss{key}.xml'),
-            ('爱恋动漫 站点1','http://1.kisssub.115000.xyz/rss{key}.xml'),
-            ('爱恋动漫 站点2','http://2.kisssub.115000.xyz/rss{key}.xml'),
-            ('爱恋动漫 站点3','http://3.kisssub.115000.xyz/rss{key}.xml'),
-            ('爱恋动漫 站点4','http://4.kisssub.115000.xyz/rss{key}.xml'),
-            ('爱恋动漫 站点5','http://5.kisssub.115000.xyz/rss{key}.xml'),
-            ('漫猫动漫 站点1','http://1.comicat.122000.xyz/rss{key}.xml'),
-            ('漫猫动漫 站点2','http://2.comicat.122000.xyz/rss{key}.xml'),
-            ('漫猫动漫 站点3','http://3.comicat.122000.xyz/rss{key}.xml'),
-            ('漫猫动漫 站点4','http://4.comicat.122000.xyz/rss{key}.xml'),
-            ('漫猫动漫 站点5','http://5.comicat.122000.xyz/rss{key}.xml'),
-            ('爱恋动漫 站点6','http://1.kisssub.org/rss{key}.xml'),
-            ('爱恋动漫 站点7','http://2.kisssub.org/rss{key}.xml'),
-            ('爱恋动漫 站点8','http://3.kisssub.org/rss{key}.xml'),
-            ('爱恋动漫 站点9','http://2.kisssub.net/rss{key}.xml'),
-            ('爱恋动漫 站点10','http://3.kisssub.net/rss{key}.xml'),
-            ('漫猫动漫','http://1.comicat.org/rss{key}.xml'),
-            ('喵喵喵','http://www.miobt.com/rss{key}.xml'),
-            ('末日动漫','https://share.acgnx.se/rss.xml{key}'),
-            ('动漫花园','https://share.dmhy.org/topics/rss/rss.xml{key}'),
+            RssGenerator('爱恋动漫 主站',func1,'http://kisssub.org/rss{key}.xml'),
+            RssGenerator('漫猫动漫 主站',func1,'http://comicat.org/rss{key}.xml'),
+            RssGenerator('爱恋动漫 站点1',func1,'http://1.kisssub.115000.xyz/rss{key}.xml'),
+            RssGenerator('爱恋动漫 站点2',func1,'http://2.kisssub.115000.xyz/rss{key}.xml'),
+            RssGenerator('爱恋动漫 站点3',func1,'http://3.kisssub.115000.xyz/rss{key}.xml'),
+            RssGenerator('爱恋动漫 站点4',func1,'http://4.kisssub.115000.xyz/rss{key}.xml'),
+            RssGenerator('爱恋动漫 站点5',func1,'http://5.kisssub.115000.xyz/rss{key}.xml'),
+            RssGenerator('漫猫动漫 站点1',func1,'http://1.comicat.122000.xyz/rss{key}.xml'),
+            RssGenerator('漫猫动漫 站点2',func1,'http://2.comicat.122000.xyz/rss{key}.xml'),
+            RssGenerator('漫猫动漫 站点3',func1,'http://3.comicat.122000.xyz/rss{key}.xml'),
+            RssGenerator('漫猫动漫 站点4',func1,'http://4.comicat.122000.xyz/rss{key}.xml'),
+            RssGenerator('漫猫动漫 站点5',func1,'http://5.comicat.122000.xyz/rss{key}.xml'),
+            RssGenerator('爱恋动漫 站点6',func1,'http://1.kisssub.org/rss{key}.xml'),
+            RssGenerator('爱恋动漫 站点7',func1,'http://2.kisssub.org/rss{key}.xml'),
+            RssGenerator('爱恋动漫 站点8',func1,'http://3.kisssub.org/rss{key}.xml'),
+            RssGenerator('爱恋动漫 站点9',func1,'http://2.kisssub.net/rss{key}.xml'),
+            RssGenerator('爱恋动漫 站点10',func1,'http://3.kisssub.net/rss{key}.xml'),
+            RssGenerator('漫猫动漫',func1,'http://1.comicat.org/rss{key}.xml'),
+            RssGenerator('喵喵喵',func1,'http://www.miobt.com/rss{key}.xml'),
+            RssGenerator('末日动漫',func2,'https://share.acgnx.se/rss.xml{key}'),
+            RssGenerator('动漫花园',func2,'https://share.dmhy.org/topics/rss/rss.xml{key}'),
             # 动漫花园的磁力链接有点怪，哈希有点短，没法直接下载种子文件，再看看研究研究
             # 'gg.al',
             # 'comicat.122000.xyz',
@@ -53,11 +65,11 @@ class RssSource:
     
     @property
     def source(self):
-        return self.sources[self.index][1]
+        return self.sources[self.index]
     
     @property
     def name(self):
-        return self.sources[self.index][0]
+        return self.source.name
     
     def switch_source(self,num=None):
         if num is None:
@@ -69,11 +81,7 @@ class RssSource:
             
 
     def rsslink(self,keys:list):
-        if self.source.startswith('https://share'):
-            keys='?keyword='+'+'.join(' '.join(keys).split()) if keys else ''
-        else:
-            keys='-'+'+'.join(' '.join(keys).split()) if keys else ''
-        return self.source.replace('{key}',keys)
+        return self.source.toRss(keys)
 
     def download(self,keys):
         for i in range(len(self.sources)):
@@ -753,8 +761,8 @@ def setRSS(num):
     showRSS()
 
 def listRSS():
-    for i,rss in enumerate([name for name,link in bangumi.rss.sources],1):
-        print(f'{i} {rss}')
+    for i,rss in enumerate(bangumi.rss.sources,1):
+        print(f'{i} {rss.name}')
 
 def showRSS():
     print(f'using RSS {bangumi.rss.name}')
