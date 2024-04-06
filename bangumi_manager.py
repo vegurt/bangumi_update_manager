@@ -1052,6 +1052,8 @@ while True:
         # raise
     finally:
         if sourcedata.contains:
-            refresh()
+            for bm in sourcedata:
+                if bm.name and bm.patterns:
+                    bm.refresh()
             save()
 
