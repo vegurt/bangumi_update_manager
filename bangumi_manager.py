@@ -611,6 +611,8 @@ def packwithlayer(item):
         layer = 1
     elif isinstance(item,episode):
         layer = 2
+    else:
+        layer = None
     return layer,item
 
 def selected(num=None):
@@ -623,7 +625,7 @@ def selected(num=None):
         tmp = sourcedata[index[0]]
     maxnum=len(tmp)
     if 0<num<=maxnum:
-        return packwithlayer(tmp[num])
+        return packwithlayer(tmp[num-1])
     else:
         print('不行了，不要，太多了，要被榨干了，不要再把陌生的东西插进来啊，要坏掉了')
         raise Exception('索引不在范围内')
