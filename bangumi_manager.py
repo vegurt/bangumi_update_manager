@@ -8,7 +8,7 @@ from datetime import datetime
 import pyperclip
 import requests
 from lxml import etree
-from rich import console
+from rich import console,table
 
 cs=console.Console()
 cookie = requests.Session()
@@ -379,7 +379,17 @@ class bangumi:
             tochoose=self.find(key)
         self.choose(tochoose)
 
-    def show(self):
+    def showpatterns(self):
+        chart = table.Table(title='')
+        chart.add_column('正则表达式',justify='left')
+        chart.add_column('起始序号',justify='right')
+
+        for pattern,index in self.patterns:
+            chart.add_row(pattern,str(index))
+
+        cs.print(chart)
+
+    def show(self,detail=False):
         sd={
             'updating':'更新中',
             'end':'已完结',
@@ -389,6 +399,10 @@ class bangumi:
         t = '(有更新) ' if self.hasnew() else ''
         cs.out(f'{t}',style='red',end='')
         print(self.name)
+        if detail:
+            print('关键词:', ' '.join(self.keys))
+            if self.patterns:
+                self.showpatterns()
         if self.tolist():
             l=self.last
             d=l.dayspast
@@ -409,6 +423,8 @@ class bangumi:
         else:
             style='rgb(0,255,255)'
         cs.out(f'状态：{sd[self.status]}',style=style)
+        if not (self.name and self.patterns):
+            print('==提示：请添加过滤器或设置番剧名==')
         
 
     def hasnew(self):
@@ -582,24 +598,35 @@ class bangumiset:
     def __iter__(self):
         return iter(self.contains)
 
-def selected(num=None):
+def currenttarget():
     res=sourcedata
-    pre_index=index[:1]
-    layer=0
-    for i in index if num is None else pre_index:
+    for i in index[:2]:
         res=res[i]
-        layer+=1
-    if num is not None:
-        if 0<num<=len(res):
-            i = num-1
-        elif len(index)>len(pre_index):
-            i = index[len(pre_index)]
-        else:
-            i=None
-        if i is not None:
-            res=res[i]
-            layer+=1
-    return layer,res
+    return res
+
+def packwithlayer(item):
+    if isinstance(item,bangumiset):
+        layer = 0
+    elif isinstance(item,bangumi):
+        layer = 1
+    elif isinstance(item,episode):
+        layer = 2
+    return layer,item
+
+def selected(num=None):
+    cur = currenttarget()
+    if num is None:
+        return packwithlayer(cur)
+    if len(index)<2:
+        tmp = cur
+    else:
+        tmp = sourcedata[index[0]]
+    maxnum=len(tmp)
+    if 0<num<=maxnum:
+        return packwithlayer(tmp[num])
+    else:
+        print('不行了，不要，太多了，要被榨干了，不要再把陌生的东西插进来啊，要坏掉了')
+        raise Exception('索引不在范围内')
 
 
 def collect(filt=True,num=None):
@@ -858,6 +885,13 @@ def showitem(num=None):
     else:
         print('请在非主页中使用该命令')
 
+def showdetail(num=None):
+    layer,target=selected(num)
+    if layer==1:
+        target.show(True)
+    else:
+        print('请在番剧中使用该命令')
+
 def export():
     filename = getFilename()
     if filename:
@@ -903,6 +937,8 @@ show [num]
   查看项目详情 适用于：番剧，剧集
 list [num]
   查看子内容列表 适用于：主页，番剧
+detail [num]
+  查看番剧详细信息 适用于：番剧
 setname 名字
   为项目命名 适用于：主页
 setkeys keys
@@ -986,10 +1022,14 @@ while True:
             showitem(int(paras) if paras else None)
         elif command=='list':
             showlist(int(paras) if paras else None)
+        elif command=='detail':
+            showdetail(int(paras) if paras else None)
         elif command == 'setname':
-            setname(paras)
+            if paras:
+                setname(paras)
         elif command == 'setkeys':
-            setkeys(paras)
+            if paras:
+                setkeys(paras)
         elif command == 'listrss':
             listRSS()
         elif command == 'setrss':
@@ -1032,12 +1072,13 @@ while True:
         elif command == 'f':
             auto_download()
         elif command == 'add':
-            if len(index)==0:
-                add_bangumi(paras)
-            elif len(index)==1:
-                add_pattern(paras)
-            else:
-                print('请在主页或番剧中使用该命令')
+            if paras:
+                if len(index)==0:
+                    add_bangumi(paras)
+                elif len(index)==1:
+                    add_pattern(paras)
+                else:
+                    print('请在主页或番剧中使用该命令')
         elif command == 'help':
             doc()
         else:
