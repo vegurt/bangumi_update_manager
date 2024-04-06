@@ -1,6 +1,8 @@
 import os
 import re
+import base64
 import itertools
+import copy
 from sys import argv
 from datetime import datetime
 import pyperclip
@@ -20,19 +22,32 @@ def download(url):
 
 class RssGenerator:
     def __init__(self,name,func,source=None) -> None:
+        '''\
+        name: RSS源名称
+        func: 参数为RSS源、关键词列表和页数，输出为RSS链接的函数
+        source: 传递到func函数作为RSS源参数的参数
+        '''
         self.name = name
         self.source = source
-        self.func=func # 一个参数为RSS源和关键词列表，输出为RSS链接的函数
+        self.func=func
 
-    def toRss(self,keys):
-        return self.func(self.source,keys)
+    def toRss(self,keys,page=1):
+        # 看到某些站点搜索结果第一页和第二页点进去的RSS的URL不一样，我满怀兴奋地加入了页码参数
+        # 结果等我哐哐哐一顿写完才发现，没什么软用，就是URL不一样而已，内容一模一样
+        # 我还说这是不是可以打破RSS展示数量的限制，把所有搜索结果都收集起来，结果就这？
+        # 我也不改了，算是弥补脚本里面一个番剧只能存一组关键词的缺陷吧
+        # 也算是希冀未来有网站能够和网页一样RSS也能翻页
+        # 反正也浪费不了多少系统资源
+        # 如果要使用多组关键词进行整合，那就不同页码返回不同链接吧
+        # 脚本从1开始遍历页码，直到返回一个空字符串为止，然后把所有结果合并
+        return self.func(self.source,keys,page)
 
 
 class RssSource:
     'RSS订阅与文件下载'
     def __init__(self) -> None:
-        func1 = lambda source,keys:source.replace('{key}','-'+'+'.join(' '.join(keys).split()) if keys else '')
-        func2 = lambda source,keys:source.replace('{key}','?keyword='+'+'.join(' '.join(keys).split()) if keys else '')
+        func1 = lambda source,keys,page:(source.format(key='-'+'+'.join(' '.join(keys).split()) if keys else '') if page==1 else '')
+        func2 = lambda source,keys,page:(source.format(key='?keyword='+'+'.join(' '.join(keys).split()) if keys else '') if page==1 else '')
         self.sources=[
             RssGenerator('爱恋动漫 主站',func1,'http://kisssub.org/rss{key}.xml'),
             RssGenerator('漫猫动漫 主站',func1,'http://comicat.org/rss{key}.xml'),
@@ -55,7 +70,6 @@ class RssSource:
             RssGenerator('喵喵喵',func1,'http://www.miobt.com/rss{key}.xml'),
             RssGenerator('末日动漫',func2,'https://share.acgnx.se/rss.xml{key}'),
             RssGenerator('动漫花园',func2,'https://share.dmhy.org/topics/rss/rss.xml{key}'),
-            # 动漫花园的磁力链接有点怪，哈希有点短，没法直接下载种子文件，再看看研究研究
             # 'gg.al',
             # 'comicat.122000.xyz',
         ]
@@ -78,25 +92,66 @@ class RssSource:
                 self.index=0
         elif isinstance(num,int) and 0<=num<len(self.sources):
             self.index=num
-            
+    
+    @staticmethod
+    def extractRss(rss):
+        '提取RSS内容'
+        rss = rss.find('channel')
+        if rss is not None:
+            res = etree.Element('channel')
+            rss = copy.deepcopy(rss)
+            for item in rss.iterfind('item'):
+                res.append(item)
+            return res
 
-    def rsslink(self,keys:list):
-        return self.source.toRss(keys)
+    @staticmethod
+    def extendRss(rss1,rss2,inplace=True):
+        'rss2的内容加到rss1里去'
+        if not inplace:
+            rss1 = copy.deepcopy(rss1)
+        rss2 = copy.deepcopy(rss2)
+        rss1.extend(rss2)
+        return rss1
+
+    def rsslink(self,keys:list,page=1):
+        return self.source.toRss(keys,page)
+
+    def getrss(self,keys,page=1,sourcetest=True):
+        for i in range(len(self.sources)):
+            link = self.rsslink(keys,page)
+            if link:
+                print(f'正在使用 {self.name} 下载第 {page} 页')
+                for j in range(self.retry_times):
+                    try:
+                        print(f'第{j+1}次尝试：',end='')
+                        res=download(link)
+                        res = self.extractRss(etree.fromstring(res.content))
+                    except Exception:
+                        print('失败。。。')
+                    else:
+                        print('成功！！')
+                        return res
+            else:
+                return
+            if not sourcetest:
+                return
+            self.switch_source()
 
     def download(self,keys):
-        for i in range(len(self.sources)):
-            print(f'正在使用 {self.name}')
-            link = self.rsslink(keys)
-            for j in range(self.retry_times):
-                try:
-                    print(f'第{j+1}次尝试：',end='')
-                    res=download(link)
-                except Exception:
-                    print('失败。。。')
+        res = None
+        for page in itertools.count(1):
+            try:
+                tmp = self.getrss(keys,page,page==1)
+                if tmp is not None and len(tmp)>0:
+                    if page==1:
+                        res=tmp
+                    else:
+                        self.extendRss(res,tmp)
                 else:
-                    print('成功！！')
-                    return res.content
-            self.switch_source()
+                    break
+            except Exception:
+                break
+        return res
 
 
 class episode:
@@ -109,11 +164,21 @@ class episode:
         self.content=None
         self.retry_times=3
 
+    def isSameWith(self, ep) -> bool:
+        if not isinstance(ep,episode):
+            return False
+        h1,h2=self.hash,ep.hash
+        if len(h1)==len(h2):
+            return h1==h2
+        else:
+            return self.name==ep.name or self.source==ep.source
+
     def show(self):
         t = '(新) ' if self.isnew else ''
         print(f'{self.datestring} {self.dayspast}天前')
         cs.out(f'{t}',style='red',end='')
         print(self.name)
+        print(f'参见：{self.source}')
     
     @property
     def xml(self):
@@ -186,10 +251,14 @@ class episode:
 
     @property
     def hash(self):
-        pattern=re.compile(r'[\d\w]{30}[\d\w]+')
-        hash = pattern.search(self.downloadurl) or pattern.search(self.source) # 我记得种子哈希值有37位的，有40位的
+        pattern=re.compile(r'[\d\w]{30}[\d\w]+') # 我记得种子哈希值有37位的，有40位的
+        hash = pattern.search(self.downloadurl) or pattern.search(self.source)
         if hash:
-            return hash.group(0)
+            res=hash.group(0)
+            if len(res)==32 and res.isupper():
+                return base64.b16encode(base64.b32decode(res)).decode().lower() # 种子短哈希转长哈希
+            else:
+                return res
 
     @property
     def torrentlink(self):
@@ -213,7 +282,7 @@ class episode:
         self.isnew=False
 
     def download(self,path=None):
-        if not self.content is None:
+        if self.content is not None:
             res = self.content
         else:
             res=None
@@ -228,14 +297,7 @@ class episode:
                     self.content=res
                     break
         if res:
-            if path:
-                pathname=os.path.abspath(path)
-            else:
-                if len(argv)>1:
-                    pathname=os.path.abspath(os.path.split(argv[1])[0])
-                else:
-                    pathname=os.path.abspath(os.getcwd)
-                pathname=os.path.join(pathname,'torrents')
+            pathname = path or 'torrents'
             if not os.path.exists(pathname):
                 os.makedirs(pathname)
             name = ''.join(self.name.splitlines())
@@ -255,14 +317,14 @@ class episode:
 
 class bangumi:
     rss = RssSource()
-    def __init__(self,name,keys,patterns=None,status='updating') -> None:
+    def __init__(self,name,keys:list[str],patterns=None,status='updating') -> None:
         self.contains={0:[]}
         self.name=name
         self.keys=keys
         self.patterns = patterns if patterns else [] #(正则表达式, 起始序号)
         self.status=status
 
-    def tolist(self):
+    def tolist(self) -> list[episode]:
         tmp=[(index,ep) for index,ep in self.contains.items() if index>0]
         tmp.sort(key=lambda i:i[0])
         res=[ep for _,ep in tmp]
@@ -276,38 +338,49 @@ class bangumi:
         for ep in l:
             self.add(ep)
 
-    def search(self,index):
+    def find(self,key=''):
+        keys=self.keys[:]
+        if key:
+            keys.extend(key.split())
+        searcher=bangumi('searcher',keys,[['.*',1]])
+        print('正在搜索：',' '.join(keys))
+        searcher.update()
+        return searcher.tolist()
+
+    def findindex(self,index):
         indexes=[]
         for ptn,begin in self.patterns:
             if begin not in indexes:
                 indexes.append(begin)
-        searcher=[bangumi('searcher',self.keys+[str(i+index-1).rjust(2,'0')],[['.*',1]]) for i in indexes]
-        
-        res_rough=[]
-        print(f'共{len(searcher)}个搜索任务')
-        for i in searcher:
-            keys=' '.join(i.keys)
-            print(f'正在搜索：{keys}')
-            i.update()
-            res_rough.extend(i.tolist())
-
-        res_matched,res_other=[],[]
-        for ep in res_rough:
-            i = self.indexofepisode(ep)
-            if i==index: #确定是需要的剧集
-                res_matched.append(ep)
-            elif i is None or i==0: #不确定是哪一集
-                res_other.append(ep)
-        res_all=res_matched+res_other
-        print('\n找到以下项目：')
-        for i,ep in enumerate(res_all,1):
-            if i == len(res_matched)+1:
+        keys=[str(i+index-1).rjust(2,'0') for i in indexes]
+        print(f'共 {len(keys)} 个搜索任务')
+        res=[]
+        for k in keys:
+            res.extend(self.find(k))
+        return res
+    
+    def choose(self,eps:list[episode]):
+        indexes = [self.indexofepisode(ep) for ep in eps]
+        matched = [ep for index,ep in zip(indexes,eps) if index is not None and index>0]
+        others = [ep for index,ep in zip(indexes,eps) if index is None or index==0]
+        available=matched+others
+        print(f'共发现 {len(available)} 个项目')
+        for i,ep in enumerate(available,1):
+            if i == len(matched)+1:
                 print('\n警告：以下剧集无法识别，添加以下剧集建议添加相应过滤器')
             print(f'{i} {ep.name}')
         chosen=input('请选择序号：')
         if chosen:
-            chosen=res_all[int(chosen)-1]
+            chosen=available[int(chosen)-1]
             self.add(chosen,True)
+
+    def search(self,key:str):
+        key=key.strip()
+        if key.isdecimal():
+            tochoose=self.findindex(int(key))
+        else:
+            tochoose=self.find(key)
+        self.choose(tochoose)
 
     def show(self):
         sd={
@@ -342,7 +415,7 @@ class bangumi:
         
 
     def hasnew(self):
-        return any([ep.isnew for ep in self])
+        return any(ep.isnew for ep in self)
     
     @property
     def last(self):
@@ -353,8 +426,8 @@ class bangumi:
     def __iter__(self):
         return iter(self.tolist())
 
-    def __contains__(self,ep):
-        return ep.hash in [i.hash for i in self.tolist()]
+    def __contains__(self,ep:episode):
+        return any(item.isSameWith(ep) for item in self.tolist())
 
     def __getitem__(self,i):
         return self.tolist()[i]
@@ -395,7 +468,7 @@ class bangumi:
 
     def add(self,ep,cover=False):
         index = self.indexofepisode(ep)
-        if not index is None and ep not in self:
+        if index is not None and ep not in self:
             if index==0:
                 self.contains[0].append(ep)
             elif index>0:
@@ -437,12 +510,15 @@ class bangumi:
         return res
     
     def updatefromrss(self,xml):
-        for ep in xml.find('channel').iterfind('item'):
+        for ep in xml.iterfind('item'):
             self.add(episode.fromrss(ep))
 
     def update(self):
-        newrss=etree.fromstring(bangumi.rss.download(self.keys))
-        self.updatefromrss(newrss)
+        newrss=bangumi.rss.download(self.keys)
+        if newrss is not None:
+            self.updatefromrss(newrss)
+        else:
+            print('更新失败，请检查网络')
 
 class bangumiset:
     def __init__(self,name='') -> None:
@@ -456,7 +532,7 @@ class bangumiset:
         self.contains.append(bm)
 
     def hasnew(self):
-        return any([bm.hasnew() for bm in self])
+        return any(bm.hasnew() for bm in self)
     
     @property
     def html(self):
@@ -516,14 +592,14 @@ def selected(num=None):
     for i in index if num is None else pre_index:
         res=res[i]
         layer+=1
-    if not num is None:
+    if num is not None:
         if 0<num<=len(res):
             i = num-1
         elif len(index)>len(pre_index):
             i = index[len(pre_index)]
         else:
             i=None
-        if not i is None:
+        if i is not None:
             res=res[i]
             layer+=1
     return layer,res
@@ -556,7 +632,7 @@ def trans(s:str):
     }
     for flag, sym in fs.items():
         s = re.sub(f'&({flag};)+', sym, s)
-    if any([f'&{flag};' in s for flag in fs]):
+    if any(f'&{flag};' in s for flag in fs):
         return trans(s)
     else:
         return s
@@ -730,10 +806,10 @@ def add_pattern(pattern):
     else:
         print('请在番剧中使用该命令')
 
-def search(index):
+def search(key):
     layer,target=selected()
     if layer==1:
-        target.search(index)
+        target.search(key)
     else:
         print('请在番剧中使用该命令')
 
@@ -786,27 +862,25 @@ def showitem(num=None):
         print('请在非主页中使用该命令')
 
 def export():
-    if not sourcedata.name:
-        sourcedata.name=input('请输入文件名：')
-    with open(f'{sourcedata.name}.html','wt',encoding='utf8') as f:
-        f.write(sourcedata.html)
+    filename = getFilename()
+    if filename:
+        path = filename+'.html'
+        with open(path,'wt',encoding='utf8') as f:
+            f.write(sourcedata.html)
 
 def save():
-    if len(argv)>1:
-        filename = argv[1]
-    elif sourcedata.name:
-        filename = sourcedata.name
+    if filepath:
+        path = filepath
     else:
-        filename = input('请输入文件名：')
-    if filename:
-        if not filename.endswith('.xml'):
-            filename = filename + '.xml'
-        sourcedata.name =os.path.splitext(os.path.split(filename)[1])[0]
-        with open(filename,'wb') as f:
+        path = getFilename()
+        if path:
+            path+='.xml'
+    if path:
+        with open(path,'wb') as f:
             f.write(etree.tostring(sourcedata.xml,pretty_print=True,encoding='utf8'))
 
-def para(s):
-    s= s.split(maxsplit=1)
+def para(s:str):
+    s= s.strip().split(maxsplit=1)
     if len(s)==2:
         return s[0],s[1]
     elif len(s)==1:
@@ -859,7 +933,7 @@ update [all]  [num]
   更新番剧列表 适用于：主页，番剧
 download [all] [num]
   下载种子文件
-search [num]
+search [key]
   替换剧集 适用于：番剧
 f
   更新下载一条龙
@@ -869,17 +943,32 @@ help
   帮助
 ''')
 
-def load_from_file(filepath):
-    with open(filepath,'rt',encoding='utf8') as f:
+def load_from_file(path):
+    global filepath
+    path=os.path.abspath(path)
+    with open(path,'rt',encoding='utf8') as f:
         sourcedata=bangumiset.fromxml(etree.fromstring(f.read()))
+    filepath=path
+    os.chdir(os.path.dirname(filepath))
     return sourcedata
 
-index=[]
+def getFilename():
+    if filepath:
+        return os.path.splitext(os.path.basename(filepath))[0]
+    elif sourcedata.name:
+        return re.sub(r'[\\/:*?"<>|]', ' ', sourcedata.name)
+    else:
+        name = input('请输入文件名:')
+        name=re.sub(r'[\\/:*?"<>|]', ' ', name)
+        if name:
+            sourcedata.name=name
+        return name
 
-if len(argv)>1:
-    sourcedata=load_from_file(argv[1])
-else:
-    sourcedata=bangumiset()
+
+index=[]
+filepath=argv[1] if len(argv)>1 else ''
+
+sourcedata=load_from_file(filepath) if filepath else bangumiset()
 
 while True:
     try:
@@ -942,7 +1031,7 @@ while True:
                 p2=int(p2.group(0))
             download_all(p1,p2)
         elif command == 'search':
-            search(int(paras))
+            search(paras)
         elif command == 'f':
             auto_download()
         elif command == 'add':
@@ -960,7 +1049,7 @@ while True:
         print('555，你知道干得正起劲突然被打断是什么感觉吗？')
     except Exception as e:
         print('粗错啦~~')
-        # print(e)
+        # raise
     finally:
         if sourcedata.contains:
             refresh()
