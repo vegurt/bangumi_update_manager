@@ -167,11 +167,8 @@ class episode:
     def isSameWith(self, ep) -> bool:
         if not isinstance(ep,episode):
             return False
-        h1,h2=self.hash,ep.hash
-        if len(h1)==len(h2):
-            return h1==h2
-        else:
-            return self.name==ep.name or self.source==ep.source
+        return self.hash==ep.hash or self.name==ep.name or \
+               self.source==ep.source or self.downloadurl==ep.downloadurl
 
     def show(self):
         t = '(新) ' if self.isnew else ''
