@@ -39,7 +39,8 @@ class RssGenerator:
         # 也算是希冀未来有网站能够和网页一样RSS也能翻页
         # 反正也浪费不了多少系统资源
         # 如果要使用多组关键词进行整合，那就不同页码返回不同链接吧
-        # 脚本从1开始遍历页码，直到返回一个空字符串为止，然后把所有结果合并
+        # 但需保证除了最后一页，前面的都返回至少一个项目
+        # 脚本从1开始遍历页码，直到搜不到为止，然后把所有结果合并
         return self.func(self.source,keys,page)
 
 
@@ -142,11 +143,13 @@ class RssSource:
         for page in itertools.count(1):
             try:
                 tmp = self.getrss(keys,page,page==1)
-                if tmp is not None and len(tmp)>0:
-                    if page==1:
-                        res=tmp
-                    else:
+                if tmp is not None:
+                    if res is None:
+                        res = etree.Element('channel')
+                    if len(tmp)>0:
                         self.extendRss(res,tmp)
+                    else:
+                        break
                 else:
                     break
             except Exception:
@@ -155,20 +158,61 @@ class RssSource:
 
 
 class episode:
-    def __init__(self,name,source,date,downloadurl='',isnew=True) -> None:
+    def __new__(cls,name,source,date,downloadurl,isnew=True):
+        if name and source:
+            if not downloadurl:
+                tmp = cls.findhash(source)
+                if tmp is None or cls.tohashv1(tmp) is None:
+                    return # 不带下载链接，就别来了
+            return super().__new__(cls)
+
+    def __init__(self,name,source,date,downloadurl,isnew=True) -> None:
         self.name = name
         self.source=source
         self.date:datetime=date
-        self.downloadurl=downloadurl
+        if downloadurl:
+            self.downloadurl=downloadurl
+        else:
+            h = self.findhash(source)
+            h = self.tohashv1(h)
+            self.downloadurl=self.hash2torrent(h)
         self.isnew:bool=isnew
         self.content=None
         self.retry_times=3
 
-    def isSameWith(self, ep) -> bool:
+    @staticmethod
+    def findhash(s):
+        res=re.search(r'\b[A-Za-z0-9]{32}(?:[A-Za-z0-9]{8})?\b',s)
+        if res:
+            res = res.group(0)
+            if len(res)==32:
+                return res.upper()
+            elif len(res)==40:
+                return res.lower()
+                
+    @staticmethod
+    def tohashv1(torrenthash:str):
+        if len(torrenthash)==32:
+            try:
+                return base64.b16encode(base64.b32decode(torrenthash.upper())).decode().lower() # 种子短哈希转长哈希
+            except Exception:
+                return
+        elif len(torrenthash)==40:
+            return torrenthash.lower()
+
+    def isSameResource(self, ep) -> bool:
+        # 只代表指向同一个资源，来源不一定相同
         if not isinstance(ep,episode):
             return False
-        return self.hash==ep.hash or self.name==ep.name or \
+        h1,h2=self.hash,ep.hash
+        return ((h1 or h2) and h1==h2) or self.name==ep.name or \
                self.source==ep.source or self.downloadurl==ep.downloadurl
+
+    def __eq__(self, ep) -> bool:
+        if not isinstance(ep,episode):
+            return False
+        return self.name==ep.name and self.date==ep.date and \
+               self.source==ep.source and self.downloadurl==ep.downloadurl
 
     def show(self):
         t = '(新) ' if self.isnew else ''
@@ -247,21 +291,16 @@ class episode:
         return f'http://v2.uploadbt.com/?r=down&hash={hash}'
 
     @property
-    def hash(self):
-        pattern=re.compile(r'[\d\w]{30}[\d\w]+') # 我记得种子哈希值有37位的，有40位的
-        hash = pattern.search(self.downloadurl) or pattern.search(self.source)
+    def hash(self): # 40位哈希值
+        hash = self.findhash(self.downloadurl) or self.findhash(self.source)
         if hash:
-            res=hash.group(0)
-            if len(res)==32 and res.isupper():
-                return base64.b16encode(base64.b32decode(res)).decode().lower() # 种子短哈希转长哈希
-            else:
-                return res
+            return self.tohashv1(hash)
 
     @property
     def torrentlink(self):
         if self.downloadurl.startswith('magnet'):
             hash = self.hash
-            if hash and len(hash)>35:
+            if hash and len(hash)==40:
                 return episode.hash2torrent(hash)
         else:
             return self.downloadurl
@@ -293,6 +332,8 @@ class episode:
                     res = res.content
                     self.content=res
                     break
+            else:
+                print('下不了，用磁链下吧')
         if res:
             pathname = path or 'torrents'
             if not os.path.exists(pathname):
@@ -364,12 +405,17 @@ class bangumi:
         print(f'共发现 {len(available)} 个项目')
         for i,ep in enumerate(available,1):
             if i == len(matched)+1:
-                print('\n警告：以下剧集无法识别，添加以下剧集建议添加相应过滤器')
-            print(f'{i} {ep.name}')
-        chosen=input('请选择序号：')
-        if chosen:
-            chosen=available[int(chosen)-1]
-            self.add(chosen,True)
+                cs.out('\n警告：以下剧集无法识别，添加以下剧集建议添加相应过滤器',style='yellow')
+            print(f'\n{i}\n{ep.datestring}\n{ep.name}')
+        if available:
+            chosen=input('\n请选择序号（多个序号用空格隔开）：')
+            if chosen:
+                for i in (int(s) for s in chosen.split()):
+                    if 0<i<=len(available):
+                        self.add(available[i-1],True)
+                        print(f'已添加剧集：{available[i-1].name}')
+                    else:
+                        print(f'超出范围的序号：{i}')
 
     def search(self,key:str):
         key=key.strip()
@@ -439,8 +485,8 @@ class bangumi:
     def __iter__(self):
         return iter(self.tolist())
 
-    def __contains__(self,ep:episode):
-        return any(item.isSameWith(ep) for item in self.tolist())
+    def hasResource(self,ep:episode):
+        return any(item.isSameResource(ep) for item in self.tolist())
 
     def __getitem__(self,i):
         return self.tolist()[i]
@@ -479,14 +525,25 @@ class bangumi:
                         break
         return index
 
-    def add(self,ep,cover=False):
+    def add(self,ep:episode|None,cover=False):
+        if ep is None:
+            return
         index = self.indexofepisode(ep)
-        if index is not None and ep not in self:
+        if index is not None:
             if index==0:
-                self.contains[0].append(ep)
+                for i,tep in enumerate(self.contains[0]):
+                    if tep.isSameResource(ep):
+                        if cover and tep != ep:
+                            self.contains[0][i]=ep
+                        break
+                else:
+                    self.contains[0].append(ep)
             elif index>0:
-                if not (index in self.contains and not cover):
-                    self.contains[index]=ep
+                if cover:
+                    if self.contains.get(index) != ep:
+                        self.contains[index]=ep
+                else:
+                    self.contains.setdefault(index,ep)
 
     def addpattern(self,pattern,begin=1):
         self.patterns.append([pattern,begin])
@@ -498,9 +555,9 @@ class bangumi:
     @staticmethod
     def text2pattern(text:str):
         if text:
-            k=[i.strip() for i in text.splitlines() if i.strip()]
-            k=[i.rsplit(',',maxsplit=1) for i in k]
-            k=[[str(a).strip(),int(b)] for a,b  in k]
+            k=[i.strip() for i in text.splitlines() if i.strip()] # 删除空白行
+            k=[i.rsplit(',',maxsplit=1) for i in k] # 分离正则表达式与起始序号
+            k=[[str(a).strip(),int(b)] for a,b  in k] # 最后的转换
             return k
         else:
             return []
@@ -524,14 +581,16 @@ class bangumi:
     
     def updatefromrss(self,xml):
         for ep in xml.iterfind('item'):
-            self.add(episode.fromrss(ep))
+            newep = episode.fromrss(ep)
+            if newep is not None:
+                self.add(newep)
 
     def update(self):
         newrss=bangumi.rss.download(self.keys)
         if newrss is not None:
             self.updatefromrss(newrss)
         else:
-            print('更新失败，请检查网络')
+            print('完蛋！网络崩了')
 
 class bangumiset:
     def __init__(self,name='') -> None:
@@ -712,7 +771,12 @@ def copy_all(filt=True,num=None):
         for ep in rest:
             print(ep.name)
     text='\n'.join([i for i in links if i])
-    pyperclip.copy(text)
+    if text:
+        pyperclip.copy(text)
+        print('已复制：')
+        print(text)
+    else:
+        print('未发现项目')
     
 def tree(filt=True):
     if filt:
@@ -780,7 +844,7 @@ def download_all(filt=True,num=None):
             pyperclip.copy(magnetlinks)
         rest = len(tmp) - len(todo) - len(tocopy)
         if rest > 0:
-            print(f'警告！{rest} 个项目无法下载！')
+            print(f'警告！{rest} 个项目找不到下载链接！') # 尽管不可能，但总要把所有情况都考虑清楚
             rest = [ep for ep in tmp if not ep.torrentlink and not ep.magnetlink]
             for ep in rest:
                 print(ep.name)
@@ -808,12 +872,18 @@ def auto_download():
 def add_bangumi(name):
     layer,target=selected()
     if layer==0:
+        if name in (bm.name for bm in target):
+            if not input('已存在该番剧，是否继续？（默认否）[y/N]').lower() in ('y','yes'):
+                return
         keys=(input('请输入关键词：')).split()
         tmp = bangumi(name,keys)
         while True:
             pattern = input('请输入过滤器：')
             if pattern == '':
                 break
+            if pattern in (p for p,i in tmp.patterns):
+                if not input('过滤器已存在，是否继续？（默认否）[y/N]').lower() in ('y','yes'):
+                    continue
             begin = input('起始序号(默认为1)：')
             begin = int(begin) if begin else 1
             tmp.addpattern(pattern,begin)
@@ -826,6 +896,9 @@ def add_pattern(pattern):
     layer,target=selected()
     if layer==1:
         tmp = target
+        if pattern in (p for p,i in tmp.patterns):
+            if not input('过滤器已存在，是否继续？（默认否）[y/N]').lower() in ('y','yes'):
+                return
         begin = input('起始序号(默认为1)：')
         begin = int(begin) if begin else 1
         tmp.addpattern(pattern,begin)
@@ -834,14 +907,25 @@ def add_pattern(pattern):
 
 def search(key):
     layer,target=selected()
-    if layer==1:
+    if layer == 0:
+        if key:
+            maxnum = len(target)
+            i = int(key)
+            if 0<i<=maxnum:
+                target[i-1].search('')
+        else:
+            print('请选择搜索内容')
+    elif layer == 1:
         target.search(key)
     else:
-        print('请在番剧中使用该命令')
+        print('请在主页或番剧中使用该命令')
 
 def setname(name):
     layer,target=selected()
-    target.name = name
+    if layer<2:
+        target.name = name
+    else:
+        print('勿要随便改动剧集名称')
 
 def setstatus(status):
     layer,target=selected()
@@ -900,6 +984,7 @@ def export():
         path = filename+'.html'
         with open(path,'wt',encoding='utf8') as f:
             f.write(sourcedata.html)
+        print(f'已保存到：{os.path.abspath(path)}')
 
 def save():
     if filepath:
@@ -942,7 +1027,7 @@ list [num]
 detail [num]
   查看番剧详细信息 适用于：番剧
 setname 名字
-  为项目命名 适用于：主页
+  为项目命名 适用于：主页，番剧
 setkeys keys
   设置番剧关键词 适用于：番剧
 listrss
@@ -968,10 +1053,10 @@ update [all]  [num]
   更新番剧列表 适用于：主页，番剧
 download [all] [num]
   下载种子文件
-search [key]
-  替换剧集 适用于：番剧
+search idx|[key]
+  替换剧集 适用于：主页，番剧
 f
-  更新下载一条龙
+  更新下载一条龙 适用于：主页，番剧
 add 名称
   添加子项目 在主页中为添加番剧，在番剧中为添加过滤器 适用于：主页，番剧
 help
@@ -1003,7 +1088,12 @@ def getFilename():
 index=[]
 filepath=argv[1] if len(argv)>1 else ''
 
-sourcedata=load_from_file(filepath) if filepath else bangumiset()
+try:
+    sourcedata=load_from_file(filepath) if filepath else bangumiset()
+except Exception:
+    print('文件有误，请检查文件格式是否正确')
+    input('按回车键退出...')
+    exit()
 
 while True:
     try:
@@ -1011,11 +1101,14 @@ while True:
         if command == 'exit':
             break
         elif command in ('select','open'):
-            try:
-                for i in [int(i) for i in paras.split()]:
-                    select(i,command=='open')
-            except Exception:
-                print('啥玩意，听不懂')
+            if paras:
+                try:
+                    for i in [int(i) for i in paras.split()]:
+                        select(i,command=='open')
+                except Exception:
+                    print('啥玩意，听不懂')
+            else:
+                print('未选择项目')
         elif command == 'back':
             back()
         elif command == 'home':
@@ -1029,13 +1122,20 @@ while True:
         elif command == 'setname':
             if paras:
                 setname(paras)
+            else:
+                print('未设置名称')
         elif command == 'setkeys':
             if paras:
                 setkeys(paras)
+            else:
+                print('未设置关键词')
         elif command == 'listrss':
             listRSS()
         elif command == 'setrss':
-            setRSS(int(paras))
+            if paras:
+                setRSS(int(paras))
+            else:
+                print('未设置RSS')
         elif command == 'showrss':
             showRSS()
         elif command == 'save':
@@ -1047,6 +1147,8 @@ while True:
                 turn_all(paras)
             elif paras in ('updating','end','abandoned','pause'):
                 setstatus(paras)
+            else:
+                print('请输入正确的标志：old|new|updating|end|abandoned|pause')
         elif command == 'copy':
             p1='all' not in paras
             p2=re.search('\\d+',paras)
@@ -1081,6 +1183,8 @@ while True:
                     add_pattern(paras)
                 else:
                     print('请在主页或番剧中使用该命令')
+            else:
+                print('未添加内容')
         elif command == 'help':
             doc()
         else:
