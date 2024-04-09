@@ -421,7 +421,7 @@ class bangumi:
             if chosen:
                 chosen = [int(s)-1 for s in chosen.split() if 0<int(s)<=len(available)]
                 chosen = [available[i] for i in chosen]
-                self.add_list(chosen)
+                self.add_list(chosen,True)
                 for ep in chosen:
                     print(f'已添加剧集：{ep.name}')
 
