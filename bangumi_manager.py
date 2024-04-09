@@ -356,38 +356,44 @@ class episode:
 class bangumi:
     rss = RssSource()
     def __init__(self,name,keys:list[str],patterns=None,status='updating') -> None:
-        self.contains={0:[]}
+        self.contains={'unrecognized':[]}
         self.name=name
         self.keys=keys
-        self.patterns = patterns if patterns else [] #(正则表达式, 起始序号)
+        self.patterns = patterns if patterns else [[],[]] #(正则表达式, 起始序号)
         self.status=status
 
     def tolist(self) -> list[episode]:
-        tmp=[(index,ep) for index,ep in self.contains.items() if index>0]
+        tmp=[(index,ep) for index,ep in self.contains.items() if isinstance(index,(int,float))]
         tmp.sort(key=lambda i:i[0])
         res=[ep for _,ep in tmp]
-        res.extend(self.contains[0])
+        res.extend(self.contains['unrecognized'])
         return res
+
+    def isavailable(self):
+        return self.name and any(self.patterns)
+
+    def clear(self):
+        self.contains.clear()
+        self.contains['unrecognized']=[]        
 
     def refresh(self):
         l = self.tolist()
-        self.contains.clear()
-        self.contains[0]=[]
-        for ep in l:
-            self.add(ep)
+        self.clear()
+        self.add_list(l)
 
     def find(self,key=''):
         keys=self.keys[:]
         if key:
             keys.extend(key.split())
-        searcher=bangumi('searcher',keys,[['.*',1]])
+        searcher=bangumi('searcher',keys)
+        searcher.addpattern('.*')
         print('正在搜索：',' '.join(keys))
         searcher.update()
         return searcher.tolist()
 
     def findindex(self,index):
         indexes=[]
-        for ptn,begin in self.patterns:
+        for ptn,begin in self.patterns[0]:
             if begin not in indexes:
                 indexes.append(begin)
         keys=[str(i+index-1).rjust(2,'0') for i in indexes]
@@ -398,24 +404,26 @@ class bangumi:
         return res
     
     def choose(self,eps:list[episode]):
-        indexes = [self.indexofepisode(ep) for ep in eps]
-        matched = [ep for index,ep in zip(indexes,eps) if index is not None and index>0]
-        others = [ep for index,ep in zip(indexes,eps) if index is None or index==0]
-        available=matched+others
+        status = [self.indexofepisode(ep)[1] for ep in eps]
+        matched = [ep for s,ep in zip(status,eps) if s==0]
+        unrecognized = [ep for s,ep in zip(status,eps) if s==2]
+        others = [ep for s,ep in zip(status,eps) if s==3]
+        available=matched+unrecognized+others
         print(f'共发现 {len(available)} 个项目')
         for i,ep in enumerate(available,1):
-            if i == len(matched)+1:
-                cs.out('\n警告：以下剧集无法识别，添加以下剧集建议添加相应过滤器',style='yellow')
+            if i == len(matched)+len(unrecognized)+1:
+                cs.out('\n警告：以下剧集没有匹配的过滤器',style='yellow')
+            elif i == len(matched)+1:
+                cs.out('\n警告：以下剧集无法识别集数',style='yellow')
             print(f'\n{i}\n{ep.datestring}\n{ep.name}')
         if available:
             chosen=input('\n请选择序号（多个序号用空格隔开）：')
             if chosen:
-                for i in (int(s) for s in chosen.split()):
-                    if 0<i<=len(available):
-                        self.add(available[i-1],True)
-                        print(f'已添加剧集：{available[i-1].name}')
-                    else:
-                        print(f'超出范围的序号：{i}')
+                chosen = [int(s)-1 for s in chosen.split() if 0<int(s)<=len(available)]
+                chosen = [available[i] for i in chosen]
+                self.add_list(chosen)
+                for ep in chosen:
+                    print(f'已添加剧集：{ep.name}')
 
     def search(self,key:str):
         key=key.strip()
@@ -427,11 +435,14 @@ class bangumi:
 
     def showpatterns(self):
         chart = table.Table(title='')
+        chart.add_column('类型',justify='center')
         chart.add_column('正则表达式',justify='left')
         chart.add_column('起始序号',justify='right')
 
-        for pattern,index in self.patterns:
-            chart.add_row(pattern,str(index))
+        for pattern,index in self.patterns[0]:
+            chart.add_row('正向',pattern,str(index))
+        for pattern in self.patterns[1]:
+            chart.add_row('反向',pattern,'-')
 
         cs.print(chart)
 
@@ -447,7 +458,7 @@ class bangumi:
         print(self.name)
         if detail:
             print('关键词:', ' '.join(self.keys))
-            if self.patterns:
+            if any(self.patterns):
                 self.showpatterns()
         if self.tolist():
             l=self.last
@@ -469,7 +480,7 @@ class bangumi:
         else:
             style='rgb(0,255,255)'
         cs.out(f'状态：{sd[self.status]}',style=style)
-        if not (self.name and self.patterns):
+        if not self.isavailable():
             print('==提示：请添加过滤器或设置番剧名==')
         
 
@@ -502,65 +513,114 @@ class bangumi:
     def turnold(self):
         for ep in self.tolist():
             ep.turnold()
+
+    @staticmethod
+    def indexofepisode_singlepattern(ep,pattern):
+        p,i = pattern
+        index = 0
+        p=p.format(index=r'(\d+\.?\d*)')
+        tmp = re.search(p,ep.name)
+        if tmp is not None:
+            res=tmp.groups()
+            if res and re.match(r'^\d+\.?\d*$',res[0]):
+                index = float(res[0])-i+1 # 防备出现7.5集之类的合集集数
+                status = 0 if index>0 else 1
+            else:
+                status=2
+        else:
+            status=3
+        return index,status
             
     def indexofepisode(self,ep):
         '''\
-        None: 未找到匹配的过滤器，或未通过筛选
-        =0: 筛选通过，但未找到剧集编号
-        <0: 通过筛选找到了剧集编号，但小于起始集数
-        >0: 通过筛选找到的剧集编号
+        3: 未通过筛选
+        2: 筛选通过，但未找到剧集编号
+        1: 通过筛选，但由于编号不对或反向过滤器排除在外
+        0: 通过筛选找到了剧集编号
         '''
-        index = None
-        for p,i in self.patterns:
-            tmp = re.search(p,ep.name)
-            if tmp:
-                if index is None:
-                    index=0
-                res=tmp.groups()
-                if res:
-                    index = int(res[0])-i+1
-                    if index<=0:
-                        index-=1
-                    else:
-                        break
-        return index
+        index,status = 0,3
+        for p in self.patterns[1]:
+            if re.search(p,ep.name) is not None:
+                return 0,1
+        for p in self.patterns[0]:
+            index_t,status_t = self.indexofepisode_singlepattern(ep,p)
+            if status_t<=status:
+                index,status=index_t,status_t
+                if status==0:
+                    break
+        return index,status
 
     def add(self,ep:episode|None,cover=False):
         if ep is None:
             return
-        index = self.indexofepisode(ep)
-        if index is not None:
-            if index==0:
-                for i,tep in enumerate(self.contains[0]):
-                    if tep.isSameResource(ep):
-                        if cover and tep != ep:
-                            self.contains[0][i]=ep
-                        break
-                else:
-                    self.contains[0].append(ep)
-            elif index>0:
-                if cover:
-                    if self.contains.get(index) != ep:
-                        self.contains[index]=ep
-                else:
-                    self.contains.setdefault(index,ep)
+        index,status = self.indexofepisode(ep)
+        if status==2:
+            for i,tep in enumerate(self.contains['unrecognized']):
+                if tep.isSameResource(ep):
+                    if cover and tep != ep:
+                        self.contains['unrecognized'][i]=ep
+                    break
+            else:
+                self.contains['unrecognized'].append(ep)
+        elif status==0:
+            if cover:
+                if self.contains.get(index) != ep:
+                    self.contains[index]=ep
+            else:
+                self.contains.setdefault(index,ep)
 
-    def addpattern(self,pattern,begin=1):
-        self.patterns.append([pattern,begin])
+    def add_list(self,eps:list[episode],cover=False):
+        flags = [True]*len(eps)
+        for p in self.patterns[0] if not cover else reversed(self.patterns[0]):
+            for i,(flag,ep) in enumerate(zip(flags,eps)):
+                if flag:
+                    index,status=self.indexofepisode_singlepattern(ep,p)
+                    if status in (0,2):
+                        self.add(ep,cover)
+                        flags[i]=False
+
+
+    def addpattern(self,pattern,begin=1,ispos=True):
+        if ispos:
+            self.patterns[0].append([pattern,begin])
+        else:
+            self.patterns[1].append(pattern)
+        self.refresh()
+
+    def add_pattern_interact(self,pattern=''):
+        regex = pattern if pattern else input('请输入过滤器：')
+        regex = regex.strip()
+        if regex:
+            direction = input('是否为正向过滤器？默认为正[Y/n]').lower() not in ('n','no')
+            if regex not in (p for p,i in self.patterns[0]) if direction else self.patterns[1] or \
+                   input('过滤器已存在，是否继续？（默认否）[y/N]').lower() in ('y','yes'):
+                begin=1
+                if direction:
+                    begin = input('起始序号(默认为1)：')
+                    begin = int(begin) if begin else 1
+                self.addpattern(regex,begin,direction)
+            return True
+
 
     @staticmethod
     def patten2text(patterns):
-        return '\n'.join([f'{p},{n}' for p,n in patterns])
+        res=[]
+        for p,i in patterns[0]:
+            res.append(f'positive: {p},{i}')
+        for p in patterns[1]:
+            res.append(f'negative: {p}')
+        return '\n'.join(res)
 
     @staticmethod
     def text2pattern(text:str):
+        res = [[],[]]
         if text:
-            k=[i.strip() for i in text.splitlines() if i.strip()] # 删除空白行
-            k=[i.rsplit(',',maxsplit=1) for i in k] # 分离正则表达式与起始序号
-            k=[[str(a).strip(),int(b)] for a,b  in k] # 最后的转换
-            return k
-        else:
-            return []
+            for line in text.splitlines():
+                if (p:=re.search(r'positive: (.*),(\d+)',line)) is not None:
+                    res[0].append((p.group(1).strip(),int(p.group(2))))
+                elif (p:=re.search(r'negative: (.*)',line)) is not None:
+                    res[1].append(p.group(1).strip())
+        return res
     
     @property
     def xml(self):
@@ -575,15 +635,13 @@ class bangumi:
     def fromxml(cls,xml:etree.Element):
         patterns=bangumi.text2pattern(trans(xml.find('ptn').text))
         res = cls(name=trans(xml.get('name','')),keys=trans(xml.get('keys','')).split(),patterns=patterns,status=trans(xml.get('status','updating')))
-        for ep in xml.iterfind('ep'):
-            res.add(episode.fromxml(ep))
+        toadd = [episode.fromxml(ep) for ep in xml.iterfind('ep')]
+        res.add_list([ep for ep in toadd if ep is not None])
         return res
     
     def updatefromrss(self,xml):
-        for ep in xml.iterfind('item'):
-            newep = episode.fromrss(ep)
-            if newep is not None:
-                self.add(newep)
+        toadd = [episode.fromrss(ep) for ep in xml.iterfind('item')]
+        self.add_list([ep for ep in toadd if ep is not None])
 
     def update(self):
         newrss=bangumi.rss.download(self.keys)
@@ -802,7 +860,7 @@ def refresh(num=None):
     else:
         print('该命令不适用于剧集')
         return
-    toprocess=[bm for bm in toprocess if bm.name and bm.patterns]
+    toprocess=[bm for bm in toprocess if bm.isavailable()]
     for bm in toprocess:
         bm.refresh()
     
@@ -819,7 +877,7 @@ def update_all(filt=True,num=None):
     else:
         print('该命令不适用于剧集')
         return
-    toprocess=[bm for bm in toprocess if bm.name and bm.patterns]
+    toprocess=[bm for bm in toprocess if bm.isavailable()]
     if toprocess:
         s=len(toprocess)
         for i,bm in enumerate(toprocess,1):
@@ -877,16 +935,7 @@ def add_bangumi(name):
                 return
         keys=(input('请输入关键词：')).split()
         tmp = bangumi(name,keys)
-        while True:
-            pattern = input('请输入过滤器：')
-            if pattern == '':
-                break
-            if pattern in (p for p,i in tmp.patterns):
-                if not input('过滤器已存在，是否继续？（默认否）[y/N]').lower() in ('y','yes'):
-                    continue
-            begin = input('起始序号(默认为1)：')
-            begin = int(begin) if begin else 1
-            tmp.addpattern(pattern,begin)
+        while tmp.add_pattern_interact():...
         target.add(tmp)
     else:
         print('请在主页中使用该命令')
@@ -895,13 +944,7 @@ def add_bangumi(name):
 def add_pattern(pattern):
     layer,target=selected()
     if layer==1:
-        tmp = target
-        if pattern in (p for p,i in tmp.patterns):
-            if not input('过滤器已存在，是否继续？（默认否）[y/N]').lower() in ('y','yes'):
-                return
-        begin = input('起始序号(默认为1)：')
-        begin = int(begin) if begin else 1
-        tmp.addpattern(pattern,begin)
+        target.add_pattern_interact(pattern)
     else:
         print('请在番剧中使用该命令')
 
@@ -1197,7 +1240,7 @@ while True:
     finally:
         if sourcedata.contains:
             for bm in sourcedata:
-                if bm.name and bm.patterns:
+                if bm.isavailable():
                     bm.refresh()
             save()
 
