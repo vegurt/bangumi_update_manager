@@ -374,7 +374,7 @@ class bangumi:
 
     def clear(self):
         self.contains.clear()
-        self.contains['unrecognized']=[]        
+        self.contains['unrecognized']=[]
 
     def refresh(self):
         l = self.tolist()
@@ -404,23 +404,42 @@ class bangumi:
         return res
     
     def choose(self,eps:list[episode]):
-        status = [self.indexofepisode(ep)[1] for ep in eps]
-        matched = [ep for s,ep in zip(status,eps) if s==0]
-        unrecognized = [ep for s,ep in zip(status,eps) if s==2]
-        others = [ep for s,ep in zip(status,eps) if s==3]
-        available=matched+unrecognized+others
-        print(f'共发现 {len(available)} 个项目')
-        for i,ep in enumerate(available,1):
-            if i == len(matched)+len(unrecognized)+1:
-                cs.out('\n警告：以下剧集没有匹配的过滤器',style='yellow')
-            elif i == len(matched)+1:
-                cs.out('\n警告：以下剧集无法识别集数',style='yellow')
-            print(f'\n{i}\n{ep.datestring}\n{ep.name}')
-        if available:
-            chosen=input('\n请选择序号（多个序号用空格隔开）：')
+        excluded = []
+        available = []
+        for ep in eps:
+            if self.is_excluded_episode(ep):
+                excluded.append(ep)
+            else:
+                available.append(ep)
+        status = [self.indexofepisode(ep)[1] for ep in available]
+        matched = [ep for s,ep in zip(status,available) if s==0]
+        unrecognized = [ep for s,ep in zip(status,available) if s==2]
+        others = [ep for s,ep in zip(status,available) if s==3]
+        lastseason = [ep for s,ep in zip(status,available) if s==1]
+        tochoose=matched+unrecognized+others+lastseason+excluded
+        print(f'共发现 {len(tochoose)} 个项目')
+        def withwarning(eplist,start,warn=''):
+            i=start
+            if eplist:
+                if warn:
+                    cs.out(warn,style='yellow')
+                for ep in eplist:
+                    print(f'\n{i}\n{ep.datestring} {ep.dayspast}天前\n{ep.name}\n参见：{ep.source}')
+                    i+=1
+            return i
+        start = withwarning(matched,1)
+        start = withwarning(unrecognized,start,'\n警告：以下剧集无法识别集数')
+        start = withwarning(others,start,'\n警告：以下剧集没有匹配的过滤器')
+        start = withwarning(lastseason,start,'\n警告：以下剧集可能是上一季')
+        start = withwarning(excluded,start,'\n警告：以下剧集已被排除')
+        if tochoose:
+            chosen=input('\n请选择序号（多个序号用空格隔开，全选输入 all ）：')
             if chosen:
-                chosen = [int(s)-1 for s in chosen.split() if 0<int(s)<=len(available)]
-                chosen = [available[i] for i in chosen]
+                if 'all' not in chosen:
+                    chosen = [int(s)-1 for s in chosen.split() if 0<int(s)<=len(tochoose)]
+                    chosen = [tochoose[i] for i in chosen]
+                else:
+                    chosen = tochoose
                 self.add_list(chosen,True)
                 for ep in chosen:
                     print(f'已添加剧集：{ep.name}')
@@ -482,7 +501,20 @@ class bangumi:
         cs.out(f'状态：{sd[self.status]}',style=style)
         if not self.isavailable():
             print('==提示：请添加过滤器或设置番剧名==')
-        
+        if detail:
+            eps = [(index,ep) for index,ep in self.contains.items() if isinstance(index,(int,float))]
+            eps.sort(key=lambda x:x[0])
+            for index,ep in eps:
+                t = int(index)
+                s = str(t if t == index else index).rjust(2,'0')
+                print(f'\n第 {s} 集')
+                ep.show()
+            if self.contains.get('unrecognized'):
+                cs.out('\n警告：以下剧集无法识别集数',style='yellow')
+                for ep in self.contains['unrecognized']:
+                    print()
+                    ep.show()
+            
 
     def hasnew(self):
         return any(ep.isnew for ep in self)
@@ -535,26 +567,21 @@ class bangumi:
         '''\
         3: 未通过筛选
         2: 筛选通过，但未找到剧集编号
-        1: 通过筛选，但由于编号不对或反向过滤器排除在外
-        0: 通过筛选找到了剧集编号
+        1: 通过筛选，但编号不对
+        0: 通过筛选找到了正确的剧集编号
         '''
         index,status = 0,3
-        for p in self.patterns[1]:
-            if re.search(p,ep.name) is not None:
-                return 0,1
         for p in self.patterns[0]:
             index_t,status_t = self.indexofepisode_singlepattern(ep,p)
             if status_t<=status:
                 index,status=index_t,status_t
-                if status==0:
+                if status<=2:
                     break
         return index,status
 
-    def add(self,ep:episode|None,cover=False):
-        if ep is None:
-            return
-        index,status = self.indexofepisode(ep)
-        if status==2:
+
+    def _add_episode(self,ep:episode,index:int|float|None,cover=False):
+        if index is None:
             for i,tep in enumerate(self.contains['unrecognized']):
                 if tep.isSameResource(ep):
                     if cover and tep != ep:
@@ -562,27 +589,47 @@ class bangumi:
                     break
             else:
                 self.contains['unrecognized'].append(ep)
-        elif status==0:
+        else:
             if cover:
                 if self.contains.get(index) != ep:
                     self.contains[index]=ep
             else:
                 self.contains.setdefault(index,ep)
+        
+    def is_excluded_episode(self,ep:episode):
+        return any(re.search(p,ep.name) for p in self.patterns[1])
+
+    def add(self,ep:episode,cover=False):
+        if not self.is_excluded_episode(ep):
+            index,status = self.indexofepisode(ep)
+            if status in (0,2):
+                self._add_episode(ep,index if status==0 else None,cover)
 
     def add_list(self,eps:list[episode],cover=False):
-        flags = [True]*len(eps)
-        for p in self.patterns[0] if not cover else reversed(self.patterns[0]):
-            for i,(flag,ep) in enumerate(zip(flags,eps)):
+        toadd = [ep for ep in eps if not self.is_excluded_episode(ep)]
+        tmp = bangumi('temp_list',self.keys,self.patterns)
+        flags = [True]*len(toadd)
+        for p in tmp.patterns[0]:
+            for i,(flag,ep) in enumerate(zip(flags,toadd)):
                 if flag:
-                    index,status=self.indexofepisode_singlepattern(ep,p)
-                    if status in (0,2):
-                        self.add(ep,cover)
+                    index,status=tmp.indexofepisode_singlepattern(ep,p)
+                    if status <= 2:
+                        if status != 1:
+                            tmp._add_episode(ep,index if status==0 else None)
                         flags[i]=False
+        for i,ep in tmp.contains.items():
+            if isinstance(i,(int,float)):
+                self._add_episode(ep,i,cover)
+        for ep in tmp.contains['unrecognized']:
+            self._add_episode(ep,None,cover)
 
 
-    def addpattern(self,pattern,begin=1,ispos=True):
+    def addpattern(self,pattern,begin=1,ispos=True,high_priority=True):
         if ispos:
-            self.patterns[0].append([pattern,begin])
+            if high_priority:
+                self.patterns[0].insert(0,[pattern,begin])
+            else:
+                self.patterns[0].append([pattern,begin])
         else:
             self.patterns[1].append(pattern)
         self.refresh()
@@ -591,14 +638,16 @@ class bangumi:
         regex = pattern if pattern else input('请输入过滤器：')
         regex = regex.strip()
         if regex:
-            direction = input('是否为正向过滤器？默认为正[Y/n]').lower() not in ('n','no')
+            direction = input('是否为正向过滤器？（默认为正）[Y/n]').lower() not in ('n','no')
             if regex not in (p for p,i in self.patterns[0]) if direction else self.patterns[1] or \
                    input('过滤器已存在，是否继续？（默认否）[y/N]').lower() in ('y','yes'):
                 begin=1
+                high_priority=True
                 if direction:
                     begin = input('起始序号(默认为1)：')
                     begin = int(begin) if begin else 1
-                self.addpattern(regex,begin,direction)
+                    high_priority = input('是否添加为最高优先级（默认是）[Y/n]').lower() not in ('n','no')
+                self.addpattern(regex,begin,direction,high_priority)
             return True
 
 
@@ -844,8 +893,12 @@ def tree(filt=True):
     if tmp:
         for name,eps in tmp:
             print(name)
-            for ep in eps:
-                print(f'- {ep.name}')
+            if eps:
+                for ep in eps:
+                    t = '（新）' if ep.isnew else ''
+                    print(f'- {t}{ep.name}')
+            else:
+                print('（空）')
             print()
     else:
         print('未发现项目')
