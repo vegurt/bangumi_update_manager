@@ -366,7 +366,7 @@ class bangumi:
         tmp=[(index,ep) for index,ep in self.contains.items() if isinstance(index,(int,float))]
         tmp.sort(key=lambda i:i[0])
         res=[ep for _,ep in tmp]
-        res.extend(self.contains['unrecognized'])
+        res.extend(sorted(self.contains['unrecognized'],key=lambda ep:ep.date))
         return res
 
     def isavailable(self):
@@ -473,13 +473,26 @@ class bangumi:
             'pause':'暂时不看',
         }
         t = '(有更新) ' if self.hasnew() else ''
-        cs.out(f'{t}',style='red',end='')
-        print(self.name)
+        cs.out(t,style='red',end='')
+        print('名称:',self.name)
         if detail:
             print('关键词:', ' '.join(self.keys))
             if any(self.patterns):
                 self.showpatterns()
-        if self.tolist():
+        sum_matched = len(self.contains) - 1
+        sum_others = len(self.contains['unrecognized'])
+        sum_eps = sum_matched + sum_others
+        print(f'共包含 {sum_eps} 个剧集')
+        if sum_eps > 0:
+            indexes = [i for i in self.contains if isinstance(i,(int,float))]
+            print(f'有 {sum_matched} 个识别到集数的剧集，', end='')
+            if indexes:
+                max_index = max(indexes)
+                if int(max_index) == max_index:
+                    max_index = int(max_index)
+                max_index = str(max_index).rjust(2,'0')
+                print(f'最新一集是第 {max_index} 集')
+            print(f'有 {sum_others} 个未识别到集数的剧集')
             l=self.last
             d=l.dayspast
             style = 'white'
@@ -501,7 +514,12 @@ class bangumi:
         cs.out(f'状态：{sd[self.status]}',style=style)
         if not self.isavailable():
             print('==提示：请添加过滤器或设置番剧名==')
-        if detail:
+            
+    def enum(self):
+        sum_eps = len(self)
+        if not sum_eps:
+            print('未发现项目')
+        else:
             eps = [(index,ep) for index,ep in self.contains.items() if isinstance(index,(int,float))]
             eps.sort(key=lambda x:x[0])
             for index,ep in eps:
@@ -511,10 +529,9 @@ class bangumi:
                 ep.show()
             if self.contains.get('unrecognized'):
                 cs.out('\n警告：以下剧集无法识别集数',style='yellow')
-                for ep in self.contains['unrecognized']:
+                for ep in sorted(self.contains['unrecognized'],key=lambda ep:ep.date):
                     print()
                     ep.show()
-            
 
     def hasnew(self):
         return any(ep.isnew for ep in self)
@@ -535,7 +552,7 @@ class bangumi:
         return self.tolist()[i]
     
     def __len__(self):
-        return len(self.tolist())
+        return len(self.contains['unrecognized']) + len(self.contains) - 1
 
     def download(self):
         for ep in self.tolist():
@@ -853,6 +870,7 @@ def showselected(num=None):
     layer,target=selected(num)
     layer=['home','bangumi','episode'][layer]
     print(f'{layer} {target.name} selected')
+    return layer,target
 
 def back():
     if index:
@@ -892,14 +910,13 @@ def tree(filt=True):
         tmp=[(bm.name, [ep for ep in bm]) for bm in sourcedata]
     if tmp:
         for name,eps in tmp:
-            print(name)
+            print('\n'+name)
             if eps:
                 for ep in eps:
                     t = '（新）' if ep.isnew else ''
                     print(f'- {t}{ep.name}')
             else:
                 print('（空）')
-            print()
     else:
         print('未发现项目')
 
@@ -934,10 +951,9 @@ def update_all(filt=True,num=None):
     if toprocess:
         s=len(toprocess)
         for i,bm in enumerate(toprocess,1):
-            print(f'正在更新：第{i}个，共{s}个')
+            print(f'\n正在更新：第{i}个，共{s}个')
             bm.show()
             bm.update()
-            print()
     else:
         print('未发现项目')
 
@@ -961,10 +977,9 @@ def download_all(filt=True,num=None):
                 print(ep.name)
         s = len(todo)
         for i,ep in enumerate(todo,1):
-            print(f'正在下载：第{i}个，共{s}个')
+            print(f'\n正在下载：第{i}个，共{s}个')
             ep.show()
             ep.download()
-            print()
     else:
         print('未发现项目')    
 
@@ -1009,6 +1024,8 @@ def search(key):
             i = int(key)
             if 0<i<=maxnum:
                 target[i-1].search('')
+            else:
+                print('无效的序号')
         else:
             print('请选择搜索内容')
     elif layer == 1:
@@ -1051,12 +1068,14 @@ def showRSS():
 
 def showlist(num=None):
     layer,target=selected(num)
-    showselected(num)
     if layer<=1:
-        for i,item in enumerate(target,1):
-            print(i)
-            item.show()
-            print()
+        l = list(target)
+        if l:
+            for i,item in enumerate(l,1):
+                print('\n序号:',i)
+                item.show()
+        else:
+            print('未发现项目')
     else:
         print('请在非剧集中使用该命令')
 
@@ -1071,6 +1090,13 @@ def showdetail(num=None):
     layer,target=selected(num)
     if layer==1:
         target.show(True)
+    else:
+        print('请在番剧中使用该命令')
+
+def enumepisode(num=None):
+    layer,target=selected(num)
+    if layer==1:
+        target.enum()
     else:
         print('请在番剧中使用该命令')
 
@@ -1122,6 +1148,8 @@ list [num]
   查看子内容列表 适用于：主页，番剧
 detail [num]
   查看番剧详细信息 适用于：番剧
+enum [num]
+  按照识别到的剧集集数列举剧集 适用于：番剧
 setname 名字
   为项目命名 适用于：主页，番剧
 setkeys keys
@@ -1150,7 +1178,7 @@ update [all]  [num]
 download [all] [num]
   下载种子文件
 search idx|[key]
-  替换剧集 适用于：主页，番剧
+  替换剧集 适用于：番剧
 f
   更新下载一条龙 适用于：主页，番剧
 add 名称
@@ -1215,6 +1243,8 @@ while True:
             showlist(int(paras) if paras else None)
         elif command=='detail':
             showdetail(int(paras) if paras else None)
+        elif command=='enum':
+            enumepisode(int(paras) if paras else None)
         elif command == 'setname':
             if paras:
                 setname(paras)
