@@ -475,24 +475,25 @@ class bangumi:
         t = '(有更新) ' if self.hasnew() else ''
         cs.out(t,style='red',end='')
         print('名称:',self.name)
+        sum_matched = len(self.contains) - 1
+        sum_others = len(self.contains['unrecognized'])
+        sum_eps = sum_matched + sum_others
         if detail:
             print('关键词:', ' '.join(self.keys))
             if any(self.patterns):
                 self.showpatterns()
-        sum_matched = len(self.contains) - 1
-        sum_others = len(self.contains['unrecognized'])
-        sum_eps = sum_matched + sum_others
-        print(f'共包含 {sum_eps} 个剧集')
+            print(f'共包含 {sum_eps} 个剧集')
         if sum_eps > 0:
-            indexes = [i for i in self.contains if isinstance(i,(int,float))]
-            print(f'有 {sum_matched} 个识别到集数的剧集，', end='')
-            if indexes:
-                max_index = max(indexes)
-                if int(max_index) == max_index:
-                    max_index = int(max_index)
-                max_index = str(max_index).rjust(2,'0')
-                print(f'最新一集是第 {max_index} 集')
-            print(f'有 {sum_others} 个未识别到集数的剧集')
+            if detail:
+                indexes = [i for i in self.contains if isinstance(i,(int,float))]
+                print(f'有 {sum_matched} 个识别到集数的剧集')
+                if indexes:
+                    max_index = max(indexes)
+                    if int(max_index) == max_index:
+                        max_index = int(max_index)
+                    max_index = str(max_index).rjust(2,'0')
+                    print(f'最新一集是第 {max_index} 集')
+                print(f'有 {sum_others} 个未识别到集数的剧集')
             l=self.last
             d=l.dayspast
             style = 'white'
