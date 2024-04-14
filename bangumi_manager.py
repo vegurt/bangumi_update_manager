@@ -355,11 +355,11 @@ class episode:
 
 class bangumi:
     rss = RssSource()
-    def __init__(self,name,keys:list[str],patterns=None,status='updating') -> None:
+    def __init__(self,name,keys:list[str] = None, patterns=None,status='updating') -> None:
         self.contains={'unrecognized':[]}
         self.name=name
-        self.keys=keys
-        self.patterns = patterns if patterns else [[],[]] #(正则表达式, 起始序号)
+        self.keys=keys if keys is not None else []
+        self.patterns = patterns if patterns is not None else [[],[]] #(正则表达式, 起始序号)
         self.status=status
 
     def tolist(self) -> list[episode]:
@@ -377,9 +377,9 @@ class bangumi:
         self.contains['unrecognized']=[]
 
     def refresh(self):
-        l = self.tolist()
-        self.clear()
-        self.add_list(l)
+        tmp = bangumi('ep_station',self.keys,self.patterns)
+        tmp.add_list(self.tolist())
+        self.contains=tmp.contains
 
     def find(self,key=''):
         keys=self.keys[:]
@@ -404,6 +404,10 @@ class bangumi:
         return res
     
     def choose(self,eps:list[episode]):
+        tmp=bangumi('reduce_repitition',self.keys)
+        tmp.addpattern('.*')
+        tmp.add_list(eps)
+        eps = tmp.tolist()
         excluded = []
         available = []
         for ep in eps:
@@ -424,7 +428,7 @@ class bangumi:
                 if warn:
                     cs.out(warn,style='yellow')
                 for ep in eplist:
-                    print(f'\n{i}\n{ep.datestring} {ep.dayspast}天前\n{ep.name}\n参见：{ep.source}')
+                    print(f'\n序号: {i}\n{ep.datestring} {ep.dayspast}天前\n{ep.name}\n参见：{ep.source}')
                     i+=1
             return i
         start = withwarning(matched,1)
@@ -568,7 +572,7 @@ class bangumi:
     def indexofepisode_singlepattern(ep,pattern):
         p,i = pattern
         index = 0
-        p=p.format(index=r'(\d+\.?\d*)')
+        p=re.sub(r'\{.*?\}',r'(\\d+\\.?\\d*)',p)
         tmp = re.search(p,ep.name)
         if tmp is not None:
             res=tmp.groups()
