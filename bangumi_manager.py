@@ -333,7 +333,7 @@ class episode:
                     self.content=res
                     break
             else:
-                print('下不了，用磁链下吧')
+                print('下载失败，可尝试使用 copy 命令复制磁力链接下载')
         if res:
             pathname = path or 'torrents'
             if not os.path.exists(pathname):
@@ -572,7 +572,7 @@ class bangumi:
     def indexofepisode_singlepattern(ep,pattern):
         p,i = pattern
         index = 0
-        p=re.sub(r'\{.*?\}',r'(\\d+\\.?\\d*)',p)
+        p=re.sub(r'\{[A-Za-z]*?\}',r'(\\d+\\.?\\d*)',p)
         tmp = re.search(p,ep.name)
         if tmp is not None:
             res=tmp.groups()
@@ -719,7 +719,7 @@ class bangumi:
         if newrss is not None:
             self.updatefromrss(newrss)
         else:
-            print('完蛋！网络崩了')
+            print('网络似乎崩了')
 
 class bangumiset:
     def __init__(self,name='') -> None:
@@ -815,7 +815,7 @@ def selected(num=None):
     if 0<num<=maxnum:
         return packwithlayer(tmp[num-1])
     else:
-        print('不行了，不要，太多了，要被榨干了，不要再把陌生的东西插进来啊，要坏掉了')
+        print(f'该项目只包含 {maxnum} 个子项目')
         raise Exception('索引不在范围内')
 
 
@@ -933,7 +933,7 @@ def refresh(num=None):
     elif layer == 1:
         toprocess.append(target)
     else:
-        print('你走吧 (back) ，我 (episode) 只有被刷的份，你不该来这里的')
+        print('剧集不存在刷新操作')
         return
     toprocess=[bm for bm in toprocess if bm.isavailable()]
     for bm in toprocess:
@@ -950,7 +950,7 @@ def update_all(filt=True,num=None):
     elif layer == 1:
         toprocess.append(target)
     else:
-        print('被关在这阴森的城堡里，哪还有出去的机会，感谢你的好意，但是，我 (episode) 出不去啦')
+        print('剧集不存在更新操作')
         return
     toprocess=[bm for bm in toprocess if bm.isavailable()]
     if toprocess:
@@ -960,7 +960,7 @@ def update_all(filt=True,num=None):
             bm.show()
             bm.update()
     else:
-        print('真没有了，大人，一滴都没有了，要不，换换口味？')
+        print('未发现需要更新的项目')
 
 def download_all(filt=True,num=None):
     tmp = collect(filt,num)
@@ -985,10 +985,8 @@ def download_all(filt=True,num=None):
             print(f'\n正在下载：第{i}个，共{s}个')
             ep.show()
             ep.download()
-        if s>0:
-            print('\n大事已成，现在，只剩下最后的步骤了')
     else:
-        print('这里的您都已经用过了，大部分用过一次就坏了，若是有中意的，倒是可以喊来。炉鼎难寻，需要进点货 (update) 么？还是，换点别的口味 (add) ？')    
+        print('未发现需要下载的项目')    
 
 def auto_download():
     if sourcedata.contains:
@@ -1000,7 +998,7 @@ def auto_download():
         download_all()
         save()
     else:
-        print('只我一人，空守王座，尊敬的友人啊，为我打下一处城池 (add) ，你就能拥有这至高的权利')
+        print('未发现任何番剧，可使用 add 命令添加')
 
 def add_bangumi(name):
     layer,target=selected()
@@ -1013,7 +1011,7 @@ def add_bangumi(name):
         while tmp.add_pattern_interact():...
         target.add(tmp)
     else:
-        print('英雄，你是否在寻找：主页 (home) ？我们的主一定会准许你的')
+        print('请在 主页 添加番剧，可使用 home 命令返回主页')
 
 
 def add_pattern(pattern):
@@ -1021,7 +1019,7 @@ def add_pattern(pattern):
     if layer==1:
         target.add_pattern_interact(pattern)
     else:
-        print('哦？我猜你要找的是番剧吧，那个喜欢搞特权的，只有他才会有这么奇怪的需求')
+        print('先选择一个番剧，而不是主页或剧集，再添加过滤器')
 
 def search(key):
     layer,target=selected()
@@ -1032,20 +1030,20 @@ def search(key):
             if 0<i<=maxnum:
                 target[i-1].search('')
             else:
-                print('再看看，是不是搞错了？')
+                print(f'只存在 {maxnum} 个番剧')
         else:
-            print('这么多材料，都没有你能看上的么？')
+            print('在主页使用搜索命令，必须搭配番剧序号使用')
     elif layer == 1:
         target.search(key)
     else:
-        print('什么玩意？我们这没有！')
+        print('本命令只作用于主页和番剧')
 
 def setname(name):
     layer,target=selected()
     if layer<2:
         target.name = name
     else:
-        print('我们的一切早已不再属于我们，只有尊敬的上主才有能力修改我们的名字')
+        print('对于剧集，名称是判断两个剧集是否相同的重要信息，不可更改')
 
 def setstatus(status):
     layer,target=selected()
@@ -1053,14 +1051,14 @@ def setstatus(status):
         if status in ('updating','end','abandoned','pause'):
             target.status=status
     else:
-        print('这是番剧的私事，我管不了')
+        print('本命令只作用于番剧')
 
 def setkeys(keys):
     layer,target=selected()
     if layer==1:
         target.keys=keys.split()
     else:
-        print('这是番剧的私事，我管不了')
+        print('本命令只作用于番剧')
 
 def setRSS(num):
     bangumi.rss.switch_source(num-1)
@@ -1082,30 +1080,31 @@ def showlist(num=None):
                 print('\n序号:',i)
                 item.show()
         else:
-            print('很高兴遇见你，客人，我想出去转转 (update) ，这样，我也许就能带回些特产了')
+            print('未发现任何子项目')
     else:
-        print('回去 (back) 吧，朋友，我只是一个微末的最底层罢了，当然，你也可以找这里的主人 (home)')
+        print('本命令只作用于主页和番剧')
 
 def showitem(num=None):
     layer,target=selected(num)
     if layer>0:
         target.show()
     else:
-        print('你想要什么？我这里有很多，但在那之前，你需要选择 (select) 一件')
+        print('本命令只作用于番剧和剧集，要查看所有番剧可使用 list 命令')
 
 def showdetail(num=None):
     layer,target=selected(num)
     if layer==1:
         target.show(True)
+        print('\ntip: 剧集详细信息可使用 enum 命令查看')
     else:
-        print('番剧也许知道这是什么')
+        print('本命令只作用于番剧')
 
 def enumepisode(num=None):
     layer,target=selected(num)
     if layer==1:
         target.enum()
     else:
-        print('去问番剧')
+        print('本命令只作用于番剧')
 
 def export():
     filename = getFilename()
@@ -1192,6 +1191,8 @@ add 名称
   添加子项目 在主页中为添加番剧，在番剧中为添加过滤器 适用于：主页，番剧
 help
   帮助
+
+中括号[]中的是选填内容，不带[]的是必填内容
 ''')
 
 def load_from_file(path):
@@ -1237,9 +1238,9 @@ while True:
                     for i in [int(i) for i in paras.split()]:
                         select(i,command=='open')
                 except Exception:
-                    print('啥玩意，听不懂')
+                    print('请使用正确的序号')
             else:
-                print('是什么让你犹豫不前？快作出选择吧，少年')
+                print('请搭配序号使用')
         elif command == 'back':
             back()
         elif command == 'home':
@@ -1281,7 +1282,7 @@ while True:
             elif paras in ('updating','end','abandoned','pause'):
                 setstatus(paras)
             else:
-                print('啊啦啊啦，这不是我可爱的小honey么？这次是来干什么呢？是想要玩弄瓦塔西 (updating|end|abandoned|pause)，还是我的宝贝们呢 (old|new) ？')
+                print('在番剧中，使用 updating|end|abandoned|pause 设置番剧状态，在任意地方使用 old|new 标记所有包含剧集的新旧')
         elif command == 'copy':
             p1='all' not in paras
             p2=re.search('\\d+',paras)
@@ -1315,15 +1316,15 @@ while True:
                 elif len(index)==1:
                     add_pattern(paras)
                 else:
-                    print('我没有这个功能，我只是一介平民，不可能会有下属的，永远不会')
+                    print('本命令只作用于主页和番剧，主页中添加番剧，番剧中添加过滤器')
             else:
-                print('未添加内容')
+                print('请搭配添加内容使用，例如：add 憧憬成为魔法少女')
         elif command == 'help':
             doc()
         else:
-            print('你要干什么呢？啊~不要~')
+            print('请输入命令，或使用 help 命令查看所有命令')
     except KeyboardInterrupt:
-        print('555，你知道干得正起劲突然被打断是什么感觉吗？')
+        print('操作被用户中断')
     except Exception as e:
         print('粗错啦~~')
         # raise
