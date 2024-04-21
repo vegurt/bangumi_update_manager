@@ -443,10 +443,10 @@ class bangumi:
                     chosen = [int(s)-1 for s in chosen.split() if 0<int(s)<=len(tochoose)]
                     chosen = [tochoose[i] for i in chosen]
                 else:
-                    chosen = tochoose
+                    chosen = sorted(tochoose,key=lambda ep:ep.date,reverse=True)
                 self.add_list(chosen,True)
                 for ep in chosen:
-                    print(f'已添加剧集：{ep.name}')
+                    print(f'已处理：{ep.name}')
 
     def search(self,key:str):
         key=key.strip()
@@ -657,7 +657,7 @@ class bangumi:
         self.refresh()
 
     def add_pattern_interact(self,pattern=''):
-        regex = pattern if pattern else input('请输入过滤器：')
+        regex = pattern if pattern else input('\n请输入过滤器（不输入任何内容直接按回车取消本次添加）: \n')
         regex = regex.strip()
         if regex:
             direction = input('是否为正向过滤器？（默认为正）[Y/n]').lower() not in ('n','no')
