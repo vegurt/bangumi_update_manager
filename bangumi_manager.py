@@ -9,6 +9,7 @@ import pyperclip
 import requests
 from lxml import etree
 from rich import console,table
+from rich import tree as rtree
 
 cs=console.Console()
 cookie = requests.Session()
@@ -126,10 +127,13 @@ class RssSource:
                     try:
                         print(f'第{j+1}次尝试：',end='')
                         res=download(link)
-                        res = self.extractRss(etree.fromstring(res.content))
                     except Exception:
                         print('失败。。。')
                     else:
+                        try:
+                            res = self.extractRss(etree.fromstring(res.content))
+                        except Exception:
+                            res = None
                         print('成功！！')
                         return res
             else:
@@ -457,7 +461,7 @@ class bangumi:
         self.choose(tochoose)
 
     def showpatterns(self):
-        chart = table.Table(title='')
+        chart = table.Table()
         chart.add_column('类型',justify='center')
         chart.add_column('正则表达式',justify='left')
         chart.add_column('起始序号',justify='right')
@@ -467,7 +471,7 @@ class bangumi:
         for pattern in self.patterns[1]:
             chart.add_row('反向',pattern,'-')
 
-        cs.print(chart)
+        cs.print(chart,markup=False)
 
     def show(self,detail=False):
         sd={
@@ -908,22 +912,34 @@ def copy_all(filt=True,num=None):
     else:
         print('未发现项目')
     
-def tree(filt=True):
-    if filt:
-        tmp=[(bm.name, [ep for ep in bm if ep.isnew]) for bm in sourcedata if bm.hasnew()]
-    else:
-        tmp=[(bm.name, [ep for ep in bm]) for bm in sourcedata]
-    if tmp:
-        for name,eps in tmp:
-            print('\n'+name)
-            if eps:
-                for ep in eps:
-                    t = '（新）' if ep.isnew else ''
-                    print(f'- {t}{ep.name}')
+def tree(filt=True,num=None):
+    layer,target=selected(num)
+    if layer<=1:
+        toptree=rtree.Tree(target.name)
+        if layer == 0:
+            tmp=[(bm.name, [ep for ep in bm if not filt or ep.isnew]) for bm in target if not filt or bm.hasnew()]
+            if tmp:
+                for name,eps in tmp:
+                    _t = toptree.add(name)
+                    if eps:
+                        for ep in eps:
+                            t = '（新）' if ep.isnew else ''
+                            _t.add(f'{t}{ep.name}')
+                    else:
+                        _t.add('（空）')
             else:
-                print('（空）')
+                toptree.add('未发现项目')
+        elif layer == 1:
+            tmp = [ep for ep in target if not filt or ep.isnew]
+            if tmp:
+                for ep in tmp:
+                    t = '（新）' if ep.isnew else ''
+                    toptree.add(f'{t}{ep.name}')
+            else:
+                toptree.add('未发现项目')
+        cs.print(toptree,markup=False)
     else:
-        print('未发现项目')
+        print('本命令只作用于主页和番剧')
 
 def refresh(num=None):
     layer,target=selected(num)
@@ -988,17 +1004,18 @@ def download_all(filt=True,num=None):
     else:
         print('未发现需要下载的项目')    
 
-def auto_download():
-    if sourcedata.contains:
+def auto_download(num=None):
+    layer,target=selected(num)
+    if layer<=1:
         print('开始更新...')
-        update_all()
+        update_all(num=num)
         print('发现新项目：')
-        tree()
+        tree(num=num)
         print('开始下载...')
-        download_all()
-        save()
+        download_all(num=num)
+        auto_save()
     else:
-        print('未发现任何番剧，可使用 add 命令添加')
+        print('本命令只作用于主页和番剧')
 
 def add_bangumi(name):
     layer,target=selected()
@@ -1115,6 +1132,7 @@ def export():
         print(f'已保存到：{os.path.abspath(path)}')
 
 def save():
+    global filepath
     if filepath:
         path = filepath
     else:
@@ -1122,10 +1140,16 @@ def save():
         if path:
             path+='.xml'
     if path:
+        path=os.path.abspath(path)
         with open(path,'wb') as f:
             f.write(etree.tostring(sourcedata.xml,pretty_print=True,encoding='utf8'))
+        filepath=path
 
-def para(s:str):
+def auto_save():
+    if filepath or sourcedata.name or sourcedata.contains:
+        save()
+
+def parse_paras(s:str):
     s= s.strip().split(maxsplit=1)
     if len(s)==2:
         return s[0],s[1]
@@ -1175,8 +1199,8 @@ mark old|new|updating|end|abandoned|pause
   updating|end|abandoned|pause 设置番剧状态 适用于：番剧
 copy [all] [num]
   复制磁力链接
-tree [new]
-  以树的形式显示，使用参数 new 只显示新项目
+tree [new] [num]
+  以树的形式显示，使用参数 new 只显示新项目 适用于：主页，番剧
 refresh [num]
   重新过滤整理剧集 适用于：主页，番剧
 update [all]  [num]
@@ -1185,7 +1209,7 @@ download [all] [num]
   下载种子文件
 search idx|[key]
   替换剧集 适用于：番剧
-f
+f [idx]
   更新下载一条龙 适用于：主页，番剧
 add 名称
   添加子项目 在主页中为添加番剧，在番剧中为添加过滤器 适用于：主页，番剧
@@ -1229,7 +1253,7 @@ except Exception:
 
 while True:
     try:
-        command,paras  = para(input('>>>'))
+        command,paras  = parse_paras(input('>>>'))
         if command == 'exit':
             break
         elif command in ('select','open'):
@@ -1290,7 +1314,11 @@ while True:
                 p2=int(p2.group(0))
             copy_all(p1,p2)
         elif command == 'tree':
-            tree(paras=='new')
+            p1='new' in paras
+            p2=re.search('\\d+',paras)
+            if p2:
+                p2=int(p2.group(0))
+            tree(p1,p2)
         elif command=='refresh':
             refresh(int(paras) if paras else None)
         elif command == 'update':
@@ -1308,7 +1336,7 @@ while True:
         elif command == 'search':
             search(paras)
         elif command == 'f':
-            auto_download()
+            auto_download(int(paras) if paras else None)
         elif command == 'add':
             if paras:
                 if len(index)==0:
@@ -1329,9 +1357,8 @@ while True:
         print('粗错啦~~')
         # raise
     finally:
-        if sourcedata.contains:
-            for bm in sourcedata:
-                if bm.isavailable():
-                    bm.refresh()
-            save()
+        for bm in sourcedata:
+            if bm.isavailable():
+                bm.refresh()
+        auto_save()
 
