@@ -908,8 +908,10 @@ def showselected(num=None):
     def item_brief(layer,item):
         layer=['主页','番剧','剧集'][layer]
         return f'{layer} {item.name}'
-    print(f'当前项目: {item_brief(*packwithlayer(currenttarget()))}')
-    print(f'活动项目: {item_brief(*selected(num))}')
+    tc=f'序号{index[0][-1]+1} ' if index[0] else ''
+    ta = f'序号{index[1]+1} ' if index[1] is not None else tc
+    print(f'当前项目:\n{tc}{item_brief(*packwithlayer(currenttarget()))}')
+    print(f'活动项目:\n{ta}{item_brief(*selected(num))}')
 
 def back():
     if index[0]:
@@ -1124,7 +1126,7 @@ def showRSS():
     print(f'using RSS {bangumi.rss.name}')
 
 def showlist(num=None):
-    layer,target=selected(num)
+    layer,target=selected(num) if num is not None else packwithlayer(currenttarget())
     if layer<=1:
         l = list(target)
         if l:
@@ -1207,10 +1209,13 @@ open idx
 select idx
   将子项目设为活动项目
   当命令不含预选择参数idx时，命令将作用于活动项目
+  list命令除外，list命令不使用idx参数时将作用于当前项目
 back
   返回上一层级
 home
   主页
+current
+  查看当前项目与活动项目
 show [idx]
   查看项目详情 适用于：番剧，剧集
 list [idx]
@@ -1309,6 +1314,8 @@ while True:
                 back()
             case 'home':
                 init()
+            case 'current':
+                showselected()
             case 'show':
                 showitem(int(paras) if paras else None)
             case 'list':
