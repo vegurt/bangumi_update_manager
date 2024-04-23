@@ -21,6 +21,8 @@ def download(url):
     res.close()
     return res
 
+class UserError(Exception):...
+
 class RssGenerator:
     def __init__(self,name,func,source=None) -> None:
         '''\
@@ -134,7 +136,12 @@ class RssSource:
                             res = self.extractRss(etree.fromstring(res.content))
                         except Exception:
                             res = None
-                        print('成功！！')
+                        if res is None:
+                            print('网站返回了非RSS数据')
+                            if sourcetest:
+                                break
+                        else:
+                            print('成功！！')
                         return res
             else:
                 return
@@ -220,7 +227,7 @@ class episode:
 
     def show(self):
         t = '(新) ' if self.isnew else ''
-        print(f'{self.datestring} {self.dayspast}天前')
+        print(self.detaildatestring)
         cs.out(f'{t}',style='red',end='')
         print(self.name)
         print(f'参见：{self.source}')
@@ -277,14 +284,37 @@ class episode:
 
     @property
     def dayspast(self):
-        return (datetime.now()-self.date.replace(hour=0,
-                        minute=0, second=0, microsecond=0)).days
+        return (datetime.now().date()-self.date.date()).days
+    
+    @property
+    def pastdaysstring(self):
+        match self.dayspast:
+            case -2:
+                return '（后天）'
+            case -1:
+                return '（明天）'
+            case 0:
+                return '（今天）'
+            case 1:
+                return '（昨天）'
+            case 2:
+                return '（前天）'
+            case int(t) if t>0:
+                return f'（{t}天前）'
+            case int(t) if t<0:
+                return f'（{t}天后）'
+            case _:
+                return ''
 
     @property
     def datestring(self):
         date = self.date.isoformat(' ')
         week = dict(enumerate(('周一', '周二', '周三', '周四', '周五', '周六', '周日'), 1))[self.date.isoweekday()]
         return f'{date} {week}'
+
+    @property
+    def detaildatestring(self):
+        return f'{self.datestring} {self.pastdaysstring}'
 
     @staticmethod
     def hash2magnet(hash):
@@ -432,7 +462,7 @@ class bangumi:
                 if warn:
                     cs.out(warn,style='yellow')
                 for ep in eplist:
-                    print(f'\n序号: {i}\n{ep.datestring} {ep.dayspast}天前\n{ep.name}\n参见：{ep.source}')
+                    print(f'\n序号: {i}\n{ep.detaildatestring}\n{ep.name}\n参见：{ep.source}')
                     i+=1
             return i
         start = withwarning(matched,1)
@@ -576,13 +606,14 @@ class bangumi:
     def indexofepisode_singlepattern(ep,pattern):
         p,i = pattern
         index = 0
-        p=re.sub(r'\{[A-Za-z]*?\}',r'(\\d+\\.?\\d*)',p)
+        p=re.sub(r'\{[A-Za-z]*?\}',r'([+-]?\\d+\\.?\\d*)',p)
         tmp = re.search(p,ep.name)
         if tmp is not None:
             res=tmp.groups()
-            if res and re.match(r'^\d+\.?\d*$',res[0]):
-                index = float(res[0])-i+1 # 防备出现7.5集之类的合集集数
-                status = 0 if index>0 else 1
+            if res and re.match(r'^[+-]?\d+\.?\d*$',res[0]):
+                _index = float(res[0]) # 防备出现7.5集之类的合集集数
+                index = _index-i+1 if i>0 else _index
+                status = 0 if _index>=i else 1
             else:
                 status=2
         else:
@@ -691,7 +722,7 @@ class bangumi:
         res = [[],[]]
         if text:
             for line in text.splitlines():
-                if (p:=re.search(r'positive: (.*),(\d+)',line)) is not None:
+                if (p:=re.search(r'positive: (.*),([+-]?\d+)',line)) is not None:
                     res[0].append((p.group(1).strip(),int(p.group(2))))
                 elif (p:=re.search(r'negative: (.*)',line)) is not None:
                     res[1].append(p.group(1).strip())
@@ -792,7 +823,7 @@ class bangumiset:
 
 def currenttarget():
     res=sourcedata
-    for i in index[:2]:
+    for i in index[0][:1]:
         res=res[i]
     return res
 
@@ -809,19 +840,20 @@ def packwithlayer(item):
 
 def selected(num=None):
     cur = currenttarget()
-    if num is None:
-        return packwithlayer(cur)
-    if len(index)<2:
-        tmp = cur
+    maxnum=len(cur)
+    if num is not None:
+        num = num-1
     else:
-        tmp = sourcedata[index[0]]
-    maxnum=len(tmp)
-    if 0<num<=maxnum:
-        return packwithlayer(tmp[num-1])
+        num = index[1]
+    if num is not None:
+        if 0<=num<maxnum:
+            tmp = cur[num]
+        else:
+            print(f'当前项目只包含 {maxnum} 个子项目')
+            raise UserError('索引不在范围内')
     else:
-        print(f'该项目只包含 {maxnum} 个子项目')
-        raise Exception('索引不在范围内')
-
+        tmp=cur
+    return packwithlayer(tmp)
 
 def collect(filt=True,num=None):
     layer,target=selected(num)
@@ -856,38 +888,41 @@ def trans(s:str):
         return s
     
 def select(num, getin = True):
-    if len(index)==0:
-        maxnum=len(sourcedata)
-        if 0<num<=maxnum:
-            index.append(num-1)
-    else:
-        if len(index)==1:
-            maxnum=len(sourcedata[index[0]]) if getin else len(sourcedata)
-        else:
-            maxnum=len(sourcedata[index[0]])
-        if 0<num<=maxnum:
-            if getin:
-                if len(index)==1:
-                    index.append(num-1)
-                else:
-                    index[1]=num-1
+    cur = currenttarget()
+    maxnum=len(cur)
+    num-=1
+    if 0<=num<maxnum:
+        if getin:
+            if len(index[0])<1:
+                index[0].append(num)
+                index[1]=None
             else:
-                index[-1]=num-1
+                print(f'剧集不存在打开操作')
+        else:
+            index[1]=num
+    else:
+        print(f'当前项目只包含 {maxnum} 个子项目')
     showselected()
-
+    
 def showselected(num=None):
-    layer,target=selected(num)
-    layer=['home','bangumi','episode'][layer]
-    print(f'{layer} {target.name} selected')
-    return layer,target
+    def item_brief(layer,item):
+        layer=['主页','番剧','剧集'][layer]
+        return f'{layer} {item.name}'
+    print(f'当前项目: {item_brief(*packwithlayer(currenttarget()))}')
+    print(f'活动项目: {item_brief(*selected(num))}')
 
 def back():
-    if index:
-        index.pop()
+    if index[0]:
+        t=index[0].pop()
+        if index[1] is not None:
+            index[1]=t
+    else:
+        index[1] = None
     showselected()
 
 def init():
-    index.clear()
+    index[0].clear()
+    index[1] = None
     showselected()
 
 def turn_all(status):
@@ -915,7 +950,7 @@ def copy_all(filt=True,num=None):
 def tree(filt=True,num=None):
     layer,target=selected(num)
     if layer<=1:
-        toptree=rtree.Tree(target.name)
+        toptree=rtree.Tree(target.name if target.name else '（未命名）')
         if layer == 0:
             tmp=[(bm.name, [ep for ep in bm if not filt or ep.isnew]) for bm in target if not filt or bm.hasnew()]
             if tmp:
@@ -1007,11 +1042,11 @@ def download_all(filt=True,num=None):
 def auto_download(num=None):
     layer,target=selected(num)
     if layer<=1:
-        print('开始更新...')
+        print('\n开始更新...')
         update_all(num=num)
-        print('发现新项目：')
+        print('\n发现新项目：')
         tree(num=num)
-        print('开始下载...')
+        print('\n开始下载...')
         download_all(num=num)
         auto_save()
     else:
@@ -1021,7 +1056,7 @@ def add_bangumi(name):
     layer,target=selected()
     if layer==0:
         if name in (bm.name for bm in target):
-            if not input('已存在该番剧，是否继续？（默认否）[y/N]').lower() in ('y','yes'):
+            if input('已存在该番剧，是否继续？（默认否）[y/N]').lower() not in ('y','yes'):
                 return
         keys=(input('请输入关键词：')).split()
         tmp = bangumi(name,keys)
@@ -1043,9 +1078,9 @@ def search(key):
     if layer == 0:
         if key:
             maxnum = len(target)
-            i = int(key)
-            if 0<i<=maxnum:
-                target[i-1].search('')
+            i = int(key)-1
+            if 0<=i<maxnum:
+                target[i].search('')
             else:
                 print(f'只存在 {maxnum} 个番剧')
         else:
@@ -1164,21 +1199,25 @@ def doc():
 
 exit
   退出程序
-open num [num]
-  选择子内容
-select num [num]
-  选择相同层级内容
+open idx
+  将子项目设为当前项目
+  当使用预选择参数idx时，命令将作用于当前项目中序号为idx的子项目
+  search命令除外，search命令使用idx参数时将作用于活动项目中序号为idx的子项目
+  适用于：主页，番剧
+select idx
+  将子项目设为活动项目
+  当命令不含预选择参数idx时，命令将作用于活动项目
 back
   返回上一层级
 home
   主页
-show [num]
+show [idx]
   查看项目详情 适用于：番剧，剧集
-list [num]
+list [idx]
   查看子内容列表 适用于：主页，番剧
-detail [num]
+detail [idx]
   查看番剧详细信息 适用于：番剧
-enum [num]
+enum [idx]
   按照识别到的剧集集数列举剧集 适用于：番剧
 setname 名字
   为项目命名 适用于：主页，番剧
@@ -1186,7 +1225,7 @@ setkeys keys
   设置番剧关键词 适用于：番剧
 listrss
   查看RSS源列表
-setrss num
+setrss idx
   设置当前使用的RSS源
 showrss
   查看当前使用的RSS源
@@ -1197,15 +1236,15 @@ export
 mark old|new|updating|end|abandoned|pause
   old|new 标记新旧
   updating|end|abandoned|pause 设置番剧状态 适用于：番剧
-copy [all] [num]
+copy [all] [idx]
   复制磁力链接
-tree [new] [num]
+tree [new] [idx]
   以树的形式显示，使用参数 new 只显示新项目 适用于：主页，番剧
-refresh [num]
+refresh [idx]
   重新过滤整理剧集 适用于：主页，番剧
-update [all]  [num]
+update [all]  [idx]
   更新番剧列表 适用于：主页，番剧
-download [all] [num]
+download [all] [idx]
   下载种子文件
 search idx|[key]
   替换剧集 适用于：番剧
@@ -1241,7 +1280,8 @@ def getFilename():
         return name
 
 
-index=[]
+index=[[],None]
+
 filepath=argv[1] if len(argv)>1 else ''
 
 try:
@@ -1254,106 +1294,109 @@ except Exception:
 while True:
     try:
         command,paras  = parse_paras(input('>>>'))
-        if command == 'exit':
-            break
-        elif command in ('select','open'):
-            if paras:
-                try:
-                    for i in [int(i) for i in paras.split()]:
-                        select(i,command=='open')
-                except Exception:
-                    print('请使用正确的序号')
-            else:
-                print('请搭配序号使用')
-        elif command == 'back':
-            back()
-        elif command == 'home':
-            init()
-        elif command=='show':
-            showitem(int(paras) if paras else None)
-        elif command=='list':
-            showlist(int(paras) if paras else None)
-        elif command=='detail':
-            showdetail(int(paras) if paras else None)
-        elif command=='enum':
-            enumepisode(int(paras) if paras else None)
-        elif command == 'setname':
-            if paras:
-                setname(paras)
-            else:
-                print('未设置名称')
-        elif command == 'setkeys':
-            if paras:
-                setkeys(paras)
-            else:
-                print('未设置关键词')
-        elif command == 'listrss':
-            listRSS()
-        elif command == 'setrss':
-            if paras:
-                setRSS(int(paras))
-            else:
-                print('未设置RSS')
-        elif command == 'showrss':
-            showRSS()
-        elif command == 'save':
-            save()
-        elif command == 'export':
-            export()
-        elif command == 'mark':
-            if paras in ('new','old'):
-                turn_all(paras)
-            elif paras in ('updating','end','abandoned','pause'):
-                setstatus(paras)
-            else:
-                print('在番剧中，使用 updating|end|abandoned|pause 设置番剧状态，在任意地方使用 old|new 标记所有包含剧集的新旧')
-        elif command == 'copy':
-            p1='all' not in paras
-            p2=re.search('\\d+',paras)
-            if p2:
-                p2=int(p2.group(0))
-            copy_all(p1,p2)
-        elif command == 'tree':
-            p1='new' in paras
-            p2=re.search('\\d+',paras)
-            if p2:
-                p2=int(p2.group(0))
-            tree(p1,p2)
-        elif command=='refresh':
-            refresh(int(paras) if paras else None)
-        elif command == 'update':
-            p1='all' not in paras
-            p2=re.search('\\d+',paras)
-            if p2:
-                p2=int(p2.group(0))
-            update_all(p1,p2)
-        elif command == 'download':
-            p1='all' not in paras
-            p2=re.search('\\d+',paras)
-            if p2:
-                p2=int(p2.group(0))
-            download_all(p1,p2)
-        elif command == 'search':
-            search(paras)
-        elif command == 'f':
-            auto_download(int(paras) if paras else None)
-        elif command == 'add':
-            if paras:
-                if len(index)==0:
-                    add_bangumi(paras)
-                elif len(index)==1:
-                    add_pattern(paras)
+        match command:
+            case 'exit':
+                break
+            case 'select'|'open':
+                if paras:
+                    try:
+                        select(int(paras), command == 'open')
+                    except Exception:
+                        print('请使用正确的序号')
                 else:
-                    print('本命令只作用于主页和番剧，主页中添加番剧，番剧中添加过滤器')
-            else:
-                print('请搭配添加内容使用，例如：add 憧憬成为魔法少女')
-        elif command == 'help':
-            doc()
-        else:
-            print('请输入命令，或使用 help 命令查看所有命令')
+                    print('请搭配序号使用')
+            case 'back':
+                back()
+            case 'home':
+                init()
+            case 'show':
+                showitem(int(paras) if paras else None)
+            case 'list':
+                showlist(int(paras) if paras else None)
+            case 'detail':
+                showdetail(int(paras) if paras else None)
+            case 'enum':
+                enumepisode(int(paras) if paras else None)
+            case 'setname':
+                if paras:
+                    setname(paras)
+                else:
+                    print('未设置名称')
+            case 'setkeys':
+                if paras:
+                    setkeys(paras)
+                else:
+                    print('未设置关键词')
+            case 'listrss':
+                listRSS()
+            case 'setrss':
+                if paras:
+                    setRSS(int(paras))
+                else:
+                    print('未设置RSS')
+            case 'showrss':
+                showRSS()
+            case 'save':
+                save()
+            case 'export':
+                export()
+            case 'mark':
+                if paras in ('new','old'):
+                    turn_all(paras)
+                elif paras in ('updating','end','abandoned','pause'):
+                    setstatus(paras)
+                else:
+                    print('在番剧中，使用 updating|end|abandoned|pause 设置番剧状态，在任意地方使用 old|new 标记所有包含剧集的新旧')
+            case 'copy':
+                p1='all' not in paras
+                p2=re.search('\\d+',paras)
+                if p2:
+                    p2=int(p2.group(0))
+                copy_all(p1,p2)
+            case 'tree':
+                p1='new' in paras
+                p2=re.search('\\d+',paras)
+                if p2:
+                    p2=int(p2.group(0))
+                tree(p1,p2)
+            case 'refresh':
+                refresh(int(paras) if paras else None)
+            case 'update':
+                p1='all' not in paras
+                p2=re.search('\\d+',paras)
+                if p2:
+                    p2=int(p2.group(0))
+                update_all(p1,p2)
+            case 'download':
+                p1='all' not in paras
+                p2=re.search('\\d+',paras)
+                if p2:
+                    p2=int(p2.group(0))
+                download_all(p1,p2)
+            case 'search':
+                search(paras)
+            case 'f':
+                auto_download(int(paras) if paras else None)
+            case 'add':
+                if paras:
+                    layer = selected()[0]
+                    if layer==0:
+                        add_bangumi(paras)
+                    elif layer==1:
+                        add_pattern(paras)
+                    else:
+                        print('本命令只作用于主页和番剧，主页中添加番剧，番剧中添加过滤器')
+                else:
+                    print('请搭配添加内容使用，例如：add 憧憬成为魔法少女')
+            case 'help':
+                doc()
+            case _:
+                print('请输入命令，或使用 help 命令查看所有命令')
     except KeyboardInterrupt:
         print('操作被用户中断')
-    except Exception as e:
+    except UserError:
+        ...
+    except Exception:
         print('粗错啦~~')
         # raise
     finally:

@@ -314,19 +314,27 @@ home example selected
 **用法：**
 
 ```
-select idx1 [idx2]
-open idx1 [idx2]
+select idx
+open idx
 ```
 
 **适用范围：主页，番剧，剧集**
 
-在主页和剧集，两者作用一致
+`select` 将子项目设为活动项目
 
-在番剧中：
+> 什么是活动项目？
+>
+> 当命令不含预选择参数 idx 时，命令将作用于活动项目
 
-`select` 选择与当前层级相同的序号为 idx 的项目
+`open` 将子项目设为当前项目
 
-`open` 则进入当前选择项目的序号为 idx 的子项目
+注意：无法将剧集设为当前项目
+
+> 什么是当前项目？
+>
+>  当使用预选择参数 idx 时，命令将作用于当前项目中序号为 idx 的子项目
+>
+>  search 命令除外，search 命令使用 idx 参数时将作用于活动项目中序号为 idx 的子项目
 
 ## 返回 `back`
 
@@ -430,7 +438,7 @@ add bangumi_name|pattern
 **用法：**
 
 ```
-refresh [num]
+refresh [idx]
 ```
 
 **适用范围：主页，番剧**
