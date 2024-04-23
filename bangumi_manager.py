@@ -421,7 +421,7 @@ class bangumi:
             keys.extend(key.split())
         searcher=bangumi('searcher',keys)
         searcher.addpattern('.*')
-        print('正在搜索：',' '.join(keys))
+        print('正在搜索:',' '.join(keys))
         searcher.update()
         return searcher.tolist()
 
@@ -1077,18 +1077,16 @@ def add_pattern(pattern):
 
 def search(key):
     layer,target=selected()
-    if layer == 0:
-        if key:
-            maxnum = len(target)
-            i = int(key)-1
-            if 0<=i<maxnum:
-                target[i].search('')
+    if layer<=1:
+        if layer == 0:
+            if key:
+                num = int(key)
+                layer,target=selected(num)
+                key = ''
             else:
-                print(f'只存在 {maxnum} 个番剧')
-        else:
-            print('在主页使用搜索命令，必须搭配番剧序号使用')
-    elif layer == 1:
-        target.search(key)
+                print('在主页使用搜索命令，必须搭配番剧序号使用')
+        if layer == 1:
+            target.search(key)
     else:
         print('本命令只作用于主页和番剧')
 
@@ -1202,14 +1200,10 @@ def doc():
 exit
   退出程序
 open idx
-  将子项目设为当前项目
-  当使用预选择参数idx时，命令将作用于当前项目中序号为idx的子项目
-  search命令除外，search命令使用idx参数时将作用于活动项目中序号为idx的子项目
-  适用于：主页，番剧
+  将当前项目的子项目设为当前项目
+  适用于：番剧
 select idx
-  将子项目设为活动项目
-  当命令不含预选择参数idx时，命令将作用于活动项目
-  list命令除外，list命令不使用idx参数时将作用于当前项目
+  将当前项目的子项目设为活动项目
 back
   返回上一层级
 home
