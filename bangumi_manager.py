@@ -10,6 +10,7 @@ import requests
 from lxml import etree
 from rich import console,table
 from rich import tree as rtree
+import opencc
 
 cs=console.Console()
 cookie = requests.Session()
@@ -406,6 +407,9 @@ class bangumi:
     def isavailable(self):
         return self.name and self.patterns[0]
 
+    def isupdatable(self,filt=True):
+        return self.isavailable() and (not filt or self.status == 'updating')
+
     def clear(self):
         self.contains.clear()
         self.contains['unrecognized']=[]
@@ -437,24 +441,22 @@ class bangumi:
             res.extend(self.find(k))
         return res
     
-    def choose(self,eps:list[episode]):
+    def packeps(self,eps:list[episode]):
         tmp=bangumi('reduce_repitition',self.keys)
         tmp.addpattern('.*')
         tmp.add_list(eps)
         eps = tmp.tolist()
-        excluded = []
-        available = []
-        for ep in eps:
-            if self.is_excluded_episode(ep):
-                excluded.append(ep)
-            else:
-                available.append(ep)
-        status = [self.indexofepisode(ep)[1] for ep in available]
-        matched = [ep for s,ep in zip(status,available) if s==0]
-        unrecognized = [ep for s,ep in zip(status,available) if s==2]
-        others = [ep for s,ep in zip(status,available) if s==3]
-        lastseason = [ep for s,ep in zip(status,available) if s==1]
-        tochoose=matched+unrecognized+others+lastseason+excluded
+        status = [self.indexofepisode(ep)[1] for ep in eps]
+        return list(zip(status,eps))
+
+    def choose(self,eps):
+        matched = [ep for s,ep in eps if s==0]
+        unrecognized = [ep for s,ep in eps if s==2]
+        others = [ep for s,ep in eps if s==3]
+        lastseason = [ep for s,ep in eps if s==1]
+        excluded = [ep for s,ep in eps if s==4]
+        nokeys = [ep for s,ep in eps if s==5]
+        tochoose=matched+unrecognized+others+lastseason+excluded+nokeys
         print(f'共发现 {len(tochoose)} 个项目')
         def withwarning(eplist,start,warn=''):
             i=start
@@ -470,6 +472,7 @@ class bangumi:
         start = withwarning(others,start,'\n警告：以下剧集没有匹配的过滤器')
         start = withwarning(lastseason,start,'\n警告：以下剧集可能是上一季')
         start = withwarning(excluded,start,'\n警告：以下剧集已被排除')
+        start = withwarning(nokeys,start,'\n以下剧集不在追番列表中')
         if tochoose:
             chosen=input('\n请选择序号（多个序号用空格隔开，全选输入 all ）：')
             if chosen:
@@ -478,9 +481,8 @@ class bangumi:
                     chosen = [tochoose[i] for i in chosen]
                 else:
                     chosen = sorted(tochoose,key=lambda ep:ep.date,reverse=True)
-                self.add_list(chosen,True)
-                for ep in chosen:
-                    print(f'已处理：{ep.name}')
+                return chosen
+        return []
 
     def search(self,key:str):
         key=key.strip()
@@ -488,7 +490,12 @@ class bangumi:
             tochoose=self.findindex(int(key))
         else:
             tochoose=self.find(key)
-        self.choose(tochoose)
+        chosen = self.choose(self.packeps(tochoose))
+        if chosen:
+            self.add_list(chosen,True)
+            for ep in chosen:
+                print(f'\n已处理：{ep.name}')
+        
 
     def showpatterns(self):
         chart = table.Table()
@@ -622,11 +629,14 @@ class bangumi:
             
     def indexofepisode(self,ep):
         '''\
+        4: 被反向过滤器排除
         3: 未通过筛选
         2: 筛选通过，但未找到剧集编号
         1: 通过筛选，但编号不对
         0: 通过筛选找到了正确的剧集编号
         '''
+        if self.is_excluded_episode(ep):
+            return 0,4
         index,status = 0,3
         for p in self.patterns[0]:
             index_t,status_t = self.indexofepisode_singlepattern(ep,p)
@@ -680,6 +690,13 @@ class bangumi:
         for ep in tmp.contains['unrecognized']:
             self._add_episode(ep,None,cover)
 
+    def match_episode(self,ep:episode):
+        # 不区分大小写与简繁字体
+        cc = opencc.OpenCC('t2s')
+        return all(cc.convert(key).lower() in cc.convert(ep.name).lower() for key in self.keys)
+
+    def match_list(self,eps:list[episode]):
+        return [ep for ep in eps if self.match_episode(ep)]
 
     def addpattern(self,pattern,begin=1,ispos=True,high_priority=True):
         if ispos:
@@ -760,6 +777,45 @@ class bangumiset:
     def __init__(self,name='') -> None:
         self.name=name
         self.contains:list[bangumi]=[]
+
+    def searcher(self, activate=True):
+        tmp = bangumi('searcher')
+        if activate:
+            tmp.addpattern('.*')
+        return tmp
+
+    def quick_add_list(self,eps,filt=True,cover=False):
+        for bm in self:
+            if bm.isupdatable(filt):
+                bm.add_list(bm.match_list(eps),cover)
+
+    def quick_update(self,filt=True):
+        tmp = self.searcher()
+        tmp.update()
+        self.quick_add_list(tmp.tolist(),filt)
+
+    def quick_search(self,key,filt=True):
+        key=key.strip()
+        tmp = self.searcher(False)
+        if key.isdecimal():
+            tochoose=tmp.findindex(int(key))
+        else:
+            tochoose=tmp.find(key)
+        bms = [bm for bm in self if bm.isupdatable(filt)]
+        def status_single(ep:episode,bm:bangumi):
+            if bm.match_episode(ep):
+                return bm.indexofepisode(ep)[1]
+            else:
+                return 5
+        def statusvalue(ep):
+            status = [status_single(ep,bm) for bm in bms]
+            return min(status) if status else 5
+        status = [statusvalue(ep) for ep in tochoose]
+        toadd = tmp.choose(list(zip(status,tochoose)))
+        self.quick_add_list(toadd,filt,True)
+        for bm in bms:
+            for ep in bm.match_list(toadd):
+                print(f'\n{bm.name} 已处理: {ep.name}')
 
     def tolist(self):
         return self.contains
@@ -992,6 +1048,15 @@ def refresh(num=None):
     for bm in toprocess:
         bm.refresh()
     
+def quick_update(filt=True):
+    layer,target=selected()
+    if layer == 0:
+        target.quick_update(filt)
+    elif layer == 1:
+        print('快速更新只用于主页，为您跳转至正常更新...')
+        update_all(filt)
+    else:
+        print('剧集不存在更新操作')
 
 def update_all(filt=True,num=None):
     layer,target=selected(num)
@@ -1041,11 +1106,14 @@ def download_all(filt=True,num=None):
     else:
         print('未发现需要下载的项目')    
 
-def auto_download(num=None):
+def auto_download(num=None,quick=False):
     layer,target=selected(num)
     if layer<=1:
         print('\n开始更新...')
-        update_all(num=num)
+        if quick:
+            quick_update()
+        else:
+            update_all(num=num)
         print('\n发现新项目：')
         tree(num=num)
         print('\n开始下载...')
@@ -1074,6 +1142,16 @@ def add_pattern(pattern):
         target.add_pattern_interact(pattern)
     else:
         print('先选择一个番剧，而不是主页或剧集，再添加过滤器')
+
+def quick_search(key):
+    layer,target=selected()
+    if layer == 0:
+        target.quick_search(key)
+    elif layer == 1:
+        print('快速搜索只用于主页，为您跳转至正常搜索...')
+        search(key)
+    else:
+        print('剧集不存在搜索操作')
 
 def search(key):
     layer,target=selected()
@@ -1241,14 +1319,20 @@ tree [new] [idx]
   以树的形式显示，使用参数 new 只显示新项目 适用于：主页，番剧
 refresh [idx]
   重新过滤整理剧集 适用于：主页，番剧
+qupdate [all]
+  快速更新番剧 适用于：主页
 update [all]  [idx]
   更新番剧列表 适用于：主页，番剧
 download [all] [idx]
   下载种子文件
+qsearch [key]
+  快速替换剧集 适用于：主页
 search idx|[key]
   替换剧集 适用于：番剧
 f [idx]
   更新下载一条龙 适用于：主页，番剧
+fq
+  快速自动更新下载 适用于：主页
 add 名称
   添加子项目 在主页中为添加番剧，在番剧中为添加过滤器 适用于：主页，番剧
 help
@@ -1362,6 +1446,8 @@ while True:
                 tree(p1,p2)
             case 'refresh':
                 refresh(int(paras) if paras else None)
+            case 'qupdate':
+                quick_update('all' not in paras)
             case 'update':
                 p1='all' not in paras
                 p2=re.search('\\d+',paras)
@@ -1374,10 +1460,12 @@ while True:
                 if p2:
                     p2=int(p2.group(0))
                 download_all(p1,p2)
+            case 'qsearch':
+                quick_search(paras)
             case 'search':
                 search(paras)
-            case 'f':
-                auto_download(int(paras) if paras else None)
+            case 'f'|'fq':
+                auto_download(int(paras) if paras else None, command=='fq')
             case 'add':
                 if paras:
                     layer = selected()[0]
