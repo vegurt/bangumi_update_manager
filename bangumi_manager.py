@@ -448,7 +448,8 @@ class bangumi:
         status = [self.indexofepisode(ep)[1] for ep in eps]
         return list(zip(status,eps))
 
-    def choose(self,eps):
+    @staticmethod
+    def choose(eps):
         matched = [ep for s,ep in eps if s==0]
         unrecognized = [ep for s,ep in eps if s==2]
         others = [ep for s,ep in eps if s==3]
@@ -491,9 +492,13 @@ class bangumi:
             tochoose=self.find(key)
         chosen = self.choose(self.packeps(tochoose))
         if chosen:
-            self.add_list(chosen,True)
-            for ep in chosen:
-                print(f'\n已处理：{ep.name}')
+            method = input('\na. 添加\nb. 下载\nc. 全部\nd. 取消\n选择需要的操作: ').strip().lower()
+            if method in ('a','c'):
+                self.add_list(chosen,True)
+                for ep in chosen:
+                    print(f'\n已处理：{ep.name}')
+            if method in ('b','c'):
+                bangumi.downloadlist(chosen)
         
 
     def showpatterns(self):
@@ -603,6 +608,29 @@ class bangumi:
         for ep in self.tolist():
             if ep.isnew:
                 ep.download()
+
+    @staticmethod
+    def downloadlist(eps:list[episode]):
+        s = len(eps)
+        links=[]
+        for i,ep in enumerate(eps,1):
+            print(f'\n正在下载：第{i}个，共{s}个')
+            ep.show()
+            if ep.torrentlink:
+                t=ep.download()
+                if not t:
+                    if ep.magnetlink:
+                        links.append(ep.magnetlink)
+                    else:
+                        print('未找到磁力链接')
+            elif ep.magnetlink:
+                links.append(ep.magnetlink)
+                print('未找到下载链接，但找到了磁力链接')
+            else:
+                print('未找到下载方式')
+        if links:
+            pyperclip.copy('\n'.join(links))
+            print('已复制磁力链接')
 
     def turnold(self):
         for ep in self.tolist():
@@ -743,7 +771,7 @@ class bangumi:
                 elif (p:=re.search(r'negative: (.*)',line)) is not None:
                     res[1].append(p.group(1).strip())
         return res
-    
+
     @property
     def xml(self):
         res = etree.Element('bm',name=self.name,keys=' '.join(self.keys),status=self.status)
@@ -811,10 +839,15 @@ class bangumiset:
             return min(status) if status else 5
         status = [statusvalue(ep) for ep in tochoose]
         toadd = tmp.choose(list(zip(status,tochoose)))
-        self.quick_add_list(toadd,filt,True)
-        for bm in bms:
-            for ep in bm.match_list(toadd):
-                print(f'\n{bm.name} 已处理: {ep.name}')
+        if toadd:
+            method = input('\na. 添加\nb. 下载\nc. 全部\nd. 取消\n选择需要的操作: ').strip().lower()
+            if method in ('a','c'):
+                self.quick_add_list(toadd,filt,True)
+                for bm in bms:
+                    for ep in bm.match_list(toadd):
+                        print(f'\n{bm.name} 已处理: {ep.name}')
+            if method in ('b','c'):
+                bangumi.downloadlist(toadd)
 
     def tolist(self):
         return self.contains
@@ -1082,26 +1115,7 @@ def update_all(filt=True,num=None):
 def download_all(filt=True,num=None):
     tmp = collect(filt,num)
     if tmp:
-        print(f'共找到 {len(tmp)} 个项目')
-        todo = [ep for ep in tmp if ep.torrentlink]
-        tocopy = [ep for ep in tmp if not ep.torrentlink and ep.magnetlink]
-        if tocopy:
-            print(f'{len(tocopy)} 个项目因未找到种子链接，已为您复制磁力链接，下载完成需手动标记为旧项目')
-            for ep in tocopy:
-                print(ep.name)
-            magnetlinks='\n'.join([ep.magnetlink for ep in tocopy])
-            pyperclip.copy(magnetlinks)
-        rest = len(tmp) - len(todo) - len(tocopy)
-        if rest > 0:
-            print(f'警告！{rest} 个项目找不到下载链接！') # 尽管不可能，但总要把所有情况都考虑清楚
-            rest = [ep for ep in tmp if not ep.torrentlink and not ep.magnetlink]
-            for ep in rest:
-                print(ep.name)
-        s = len(todo)
-        for i,ep in enumerate(todo,1):
-            print(f'\n正在下载：第{i}个，共{s}个')
-            ep.show()
-            ep.download()
+        bangumi.downloadlist(tmp)
     else:
         print('未发现需要下载的项目')    
 
