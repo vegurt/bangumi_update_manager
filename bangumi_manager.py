@@ -398,10 +398,9 @@ class bangumi:
         self.status=status
 
     def tolist(self) -> list[episode]:
-        tmp=[(index,ep) for index,ep in self.contains.items() if isinstance(index,(int,float))]
-        tmp.sort(key=lambda i:i[0])
-        res=[ep for _,ep in tmp]
-        res.extend(sorted(self.contains['unrecognized'],key=lambda ep:ep.date))
+        res = self.contains['unrecognized'][:]
+        res.extend([ep for ep in self.contains.values() if isinstance(ep,episode)])
+        res.sort(key=lambda ep:ep.date,reverse=True)
         return res
 
     def isavailable(self):
