@@ -479,7 +479,7 @@ enum [idx]
 **用法：**
 
 ```
-add bangumi_name|pattern
+add bangumi_name|regex
 ```
 
 **适用范围：主页，番剧**
@@ -658,7 +658,11 @@ fq
 **用法：**
 
 ```
-search idx|[key]
+search idx
+search [key] [opt]
+    [opt]:
+        -i idx1,idx2,...
+        --index=idx1,idx2,...
 ```
 
 **适用范围：番剧**
@@ -667,21 +671,43 @@ search idx|[key]
 
 当前项目是番剧时，使用额外的关键词 `key` （可选）结合番剧关键词搜索，替换或添加剧集
 
+使用可选参数 index 可搜索集数为 idx1, idx2,... 的剧集
+
+参数 index 只能放在最前面或最后面，不能放中间
+
 当你对某一集的资源不满意时，可以使用这个指令换一个资源
 
 搜索完成后会分成两个部分，第一部分是可识别集数的，直接选就行，第二部分是识别不了集数和任何一个过滤器都匹配不上的，建议先去添加过滤器，再添加剧集，不然加进去了也不会替换掉原来的剧集，或者根本加不进去。虽然本程序允许不带集数识别字段的过滤器（就是代表集数的分组），但推荐还是加进去。
+
+**示例：**
+
+```
+search 1
+search lolihouse -i 7,8,9
+search lolihouse --index=7,8,9
+```
 
 ## 快速搜索 `qsearch`
 
 **用法：**
 
 ```
-qsearch [key]
+qsearch [key] [opt]
+    [opt]
+        -i idx1,idx2,...
+        --index=idx1,idx2,...
 ```
 
 **适用范围：主页**
 
 不需要指定具体番剧，让选定的剧集自己找路回去
+
+**示例：**
+
+```
+qsearch 七王子 1080 -i 7,8,9
+qsearch 七王子 1080 --index=7,8,9
+```
 
 ## 设置名称 `setname`
 
