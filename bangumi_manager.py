@@ -506,9 +506,10 @@ class bangumi:
             2:'\n警告：以下剧集无法识别集数',
             3:'\n警告：以下剧集没有匹配的过滤器',
             4:'\n警告：以下剧集已被排除',
-            5:'\n以下剧集不在追番列表中',
+            5:'\n以下剧集所在番剧可以添加过滤器了',
+            6:'\n以下剧集不在追番列表中',
         }
-        code_order=(0,2,3,1,4,5)
+        code_order=(0,5,2,3,1,4,6)
         block_size=10
         total_num=len(eps)
         print(f'共发现 {total_num} 个项目')
@@ -893,12 +894,16 @@ class bangumiset:
         bms = [bm for bm in self if bm.isupdatable(filt)]
         def status_single(ep:episode,bm:bangumi):
             if bm.match_episode(ep):
-                return bm.indexofepisode(ep)[1]
+                if bm.isavailable():
+                    return bm.indexofepisode(ep)[1]
+                else:
+                    return 5
             else:
-                return 5
+                return 6
         def statusvalue(ep):
-            status = [status_single(ep,bm) for bm in bms]
-            return min(status) if status else 5
+            code_order=(0,1,2,3,5,6,4)
+            status = [status_single(ep,bm) for bm in self]
+            return min(status,key=lambda i:code_order.index(i)) if status else 6
         status = [statusvalue(ep) for ep in tochoose]
         toadd = tmp.choose(list(zip(status,tochoose)))
         if toadd:
