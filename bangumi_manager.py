@@ -278,7 +278,9 @@ class episode:
         source=trans(xml.get('source',''))
         date=trans(xml.get('date',''))
         downloadurl=trans(xml.get('downloadurl',''))
-        isnew=eval(trans(xml.get('isnew','True')))
+        str2bool = lambda s:{'True' :True,  'true' :True, 'T':True,  't':True, '1':True,
+                             'False':False, 'false':False,'F':False, 'f':False,'0':False}.get(s,True)
+        isnew=str2bool(trans(xml.get('isnew','True')))
 
         date = str2date(date) if date else datetime.min
         return cls(name,source,date,downloadurl,isnew)
@@ -368,7 +370,7 @@ class episode:
                     self.content=res
                     break
             else:
-                print('下载失败，可尝试使用 copy 命令复制磁力链接下载')
+                print('下载失败，可尝试使用 copy|cp 命令复制磁力链接下载')
         if res:
             pathname = path or 'torrents'
             if not os.path.exists(pathname):
@@ -390,7 +392,7 @@ class episode:
 
 class bangumi:
     rss = RssSource()
-    def __init__(self,name,keys:list[str] = None, patterns=None,status='updating') -> None:
+    def __init__(self,name,keys:list[str]|None = None, patterns=None,status='updating') -> None:
         self.contains={'unrecognized':[]}
         self.name=name
         self.keys=keys if keys is not None else []
@@ -497,38 +499,52 @@ class bangumi:
         return list(zip(status,eps))
 
     @staticmethod
-    def choose(eps):
-        matched = [ep for s,ep in eps if s==0]
-        unrecognized = [ep for s,ep in eps if s==2]
-        others = [ep for s,ep in eps if s==3]
-        lastseason = [ep for s,ep in eps if s==1]
-        excluded = [ep for s,ep in eps if s==4]
-        nokeys = [ep for s,ep in eps if s==5]
-        tochoose=matched+unrecognized+others+lastseason+excluded+nokeys
-        print(f'共发现 {len(tochoose)} 个项目')
-        def withwarning(eplist,start,warn=''):
-            i=start
-            if eplist:
-                if warn:
-                    cs.out(warn,style='yellow')
-                for ep in eplist:
-                    print(f'\n序号: {i}\n{ep.detaildatestring}\n{ep.name}\n参见：{ep.source}')
-                    i+=1
-            return i
-        start = withwarning(matched,1)
-        start = withwarning(unrecognized,start,'\n警告：以下剧集无法识别集数')
-        start = withwarning(others,start,'\n警告：以下剧集没有匹配的过滤器')
-        start = withwarning(lastseason,start,'\n警告：以下剧集可能是上一季')
-        start = withwarning(excluded,start,'\n警告：以下剧集已被排除')
-        start = withwarning(nokeys,start,'\n以下剧集不在追番列表中')
-        if tochoose:
-            chosen=input('\n请选择序号（多个序号用空格隔开，全选输入 all ）：')
-            if chosen:
-                if 'all' not in chosen:
-                    chosen = [int(s)-1 for s in chosen.split() if s.isdecimal() and 0<int(s)<=len(tochoose)]
-                    chosen = [tochoose[i] for i in chosen]
+    def choose(eps:list[tuple[int,episode]]):
+        code_description={
+            0:'',
+            1:'\n警告：以下剧集可能是上一季',
+            2:'\n警告：以下剧集无法识别集数',
+            3:'\n警告：以下剧集没有匹配的过滤器',
+            4:'\n警告：以下剧集已被排除',
+            5:'\n以下剧集不在追番列表中',
+        }
+        code_order=(0,2,3,1,4,5)
+        block_size=10
+        total_num=len(eps)
+        print(f'共发现 {total_num} 个项目')
+        if total_num>0:
+            tochoose=[(i,s,ep) for i,(s,ep) in enumerate(sorted(eps,key=lambda i:code_order.index(i[0])),1)]
+            def letchoose(command:str):
+                command=command.strip()
+                if command:
+                    if 'q' in command:
+                        return [] # 退出
+                    else:
+                        ep_all = [i[2] for i in tochoose]
+                        if 'all' in command:
+                            chosen = sorted(ep_all,key=lambda ep:ep.date,reverse=True)
+                        else:
+                            chosen = [int(s)-1 for s in command.split() if s.isdecimal() and 0<int(s)<=total_num]
+                            chosen = [ep_all[i] for i in chosen]
+                        return chosen
                 else:
-                    chosen = sorted(tochoose,key=lambda ep:ep.date,reverse=True)
+                    return None # 展示更多
+            blocks=[tochoose[i:i+block_size] for i in range(0,total_num,block_size)]
+            for block in blocks:
+                status=None
+                for i,s,ep in block:
+                    if s!=status:
+                        status=s
+                        warn=code_description[status]
+                        if warn:
+                            cs.out(warn,style='yellow')
+                    print(f'\n序号: {i}\n{ep.detaildatestring}\n{ep.name}\n参见：{ep.source}')
+                chosen = letchoose(input('\n请选择序号（多个序号用空格隔开，全选输入 all ），或按回车显示更多，q退出：\n'))
+                if chosen is not None:
+                    return chosen
+            print('\n没有更多项目了')
+            chosen = letchoose(input('\n请选择序号（多个序号用空格隔开，全选输入 all ）：\n'))
+            if chosen is not None:
                 return chosen
         return []
 
@@ -541,7 +557,7 @@ class bangumi:
             if method in ('a','c'):
                 self.add_list(chosen,True)
                 for ep in chosen:
-                    print(f'\n已处理：{ep.name}')
+                    print(f'\n已处理:\n{ep.name}')
             if method in ('b','c'):
                 bangumi.downloadlist(chosen)
         
@@ -852,8 +868,8 @@ class bangumiset:
         self.name=name
         self.contains:list[bangumi]=[]
 
-    def searcher(self, activate=True):
-        tmp = bangumi('searcher')
+    def searcher(self, keys=None, activate=True):
+        tmp = bangumi('searcher',keys)
         if activate:
             tmp.addpattern('.*')
         return tmp
@@ -863,14 +879,16 @@ class bangumiset:
             if bm.isupdatable(filt):
                 bm.add_list(bm.match_list(eps),cover)
 
-    def quick_update(self,filt=True):
-        tmp = self.searcher()
+    def quick_update(self, keys=None, filt=True):
+        tmp = self.searcher(keys)
+        if keys is not None:
+            print('正在查找:',' '.join(keys))
         tmp.update()
         self.quick_add_list(tmp.tolist(),filt)
 
-    def quick_search(self,key:str,filt=True):
+    def quick_search(self,key:str,filt=False):
         key=key.strip()
-        tmp = self.searcher(False)
+        tmp = self.searcher(activate=False)
         tochoose=tmp.find_advanced(key)
         bms = [bm for bm in self if bm.isupdatable(filt)]
         def status_single(ep:episode,bm:bangumi):
@@ -889,7 +907,7 @@ class bangumiset:
                 self.quick_add_list(toadd,filt,True)
                 for bm in bms:
                     for ep in bm.match_list(toadd):
-                        print(f'\n{bm.name} 已处理: {ep.name}')
+                        print(f'\n{bm.name} 已处理:\n{ep.name}')
             if method in ('b','c'):
                 bangumi.downloadlist(toadd)
 
@@ -1124,12 +1142,12 @@ def refresh(num=None):
     for bm in toprocess:
         bm.refresh()
     
-def quick_update(filt=True,num=None):
-    layer,target=selected(num)
+def quick_update(keys=None,filt=True):
+    layer,target=selected()
     if layer == 0:
-        target.quick_update(filt)
+        target.quick_update(keys,filt)
     elif layer == 1:
-        print('快速更新只用于主页\n更新单个番剧请使用一般更新命令 update')
+        print('快速更新只用于主页\n更新单个番剧请使用一般更新命令 update|up')
     else:
         print('剧集不存在更新操作')
 
@@ -1162,27 +1180,33 @@ def download_all(filt=True,num=None):
     else:
         print('未发现需要下载的项目')    
 
-def auto_download(num=None,quick=False):
-    layer,target=selected(num)
-    if quick and layer == 1:
+def auto_download_quick(keys=None,filt=True):
+    layer,target=selected()
+    if layer==0:
+        print('\n开始更新...')
+        quick_update(keys,filt)
+        print('\n发现新项目：')
+        tree()
+        print('\n开始下载...')
+        download_all()
+        auto_save()
+    elif layer == 1:
         print('快速自动更新下载只用于主页\n对单个番剧自动更新下载请使用一般自动更新命令 f')
-        return
+    else:
+        print('本命令只作用于主页')
+
+def auto_download(filt=True,num=None):
+    layer,target=selected(num)
     if layer<=1:
         print('\n开始更新...')
-        if quick:
-            quick_update(num=num)
-        else:
-            update_all(num=num)
+        update_all(filt,num)
         print('\n发现新项目：')
         tree(num=num)
         print('\n开始下载...')
         download_all(num=num)
         auto_save()
     else:
-        if quick:
-            print('本命令只作用于主页')
-        else:
-            print('本命令只作用于主页和番剧')
+        print('本命令只作用于主页和番剧')
 
 def add_bangumi(name):
     layer,target=selected()
@@ -1195,7 +1219,7 @@ def add_bangumi(name):
         while tmp.add_pattern_interact():...
         target.add(tmp)
     else:
-        print('请在 主页 添加番剧，可使用 home 命令返回主页')
+        print('请在 主页 添加番剧，可使用 home|hm 命令返回主页')
 
 
 def add_pattern(pattern):
@@ -1210,7 +1234,7 @@ def quick_search(key):
     if layer == 0:
         target.quick_search(key)
     elif layer == 1:
-        print('快速搜索只用于主页\n搜索单个番剧请使用一般搜索命令 search')
+        print('快速搜索只用于主页\n搜索单个番剧请使用一般搜索命令 search|sch')
     else:
         print('剧集不存在搜索操作')
 
@@ -1223,7 +1247,7 @@ def search(key:str):
                 layer,target=selected(num)
                 key = ''
             else:
-                print('在主页使用搜索命令，必须搭配番剧序号使用\n要在主页搜索，可尝试快速搜索命令 qsearch')
+                print('在主页使用搜索命令，必须搭配番剧序号使用\n要在主页搜索，可尝试快速搜索命令 searchq|schq')
         if layer == 1:
             target.search(key)
     else:
@@ -1280,7 +1304,7 @@ def showitem(num=None):
     if layer>0:
         target.show()
     else:
-        print('本命令只作用于番剧和剧集，要查看所有番剧可使用 list 命令')
+        print('本命令只作用于番剧和剧集，要查看所有番剧可使用 list|ls 命令')
 
 def showdetail(num=None):
     layer,target=selected(num)
@@ -1301,76 +1325,82 @@ def doc():
     print('''\
 层级名称：主页(home)，番剧(bangumi)，剧集(episode)
 
-exit
+exit|quit|q
   退出程序
-open idx
+cls
+  清屏
+open|opn idx
   将当前项目的子项目设为当前项目
   适用于：番剧
-select idx
+select|sl idx
   将当前项目的子项目设为活动项目
-back
+back|bk
   返回上一层级
-home
+home|hm
   主页
-current
+current|cwd
   查看当前项目与活动项目
 show [idx]
   查看项目详情 适用于：番剧，剧集
-list [idx]
+list|ls [idx]
   查看子内容列表 适用于：主页，番剧
-detail [idx]
+detail|dt [idx]
   查看番剧详细信息 适用于：番剧
 enum [idx]
   按照识别到的剧集集数列举剧集 适用于：番剧
-setname name
+setname|name|nm name
   为项目命名 适用于：主页，番剧
-setkeys keys
+setkeys|keys|ks keys
   设置番剧关键词 适用于：番剧
-listrss
+listrss|lr
   查看RSS源列表
-setrss idx
+setrss|sr idx
   设置当前使用的RSS源
-showrss
+showrss|rss
   查看当前使用的RSS源
-save
+save|s
   保存项目
-export
+export|p
   导出为html方便浏览器查看
-mark old|new|updating|end|abandoned|pause
+mark|mk old|new|updating|end|abandoned|pause
   old|new 标记新旧
   updating|end|abandoned|pause 设置番剧状态 适用于：番剧
-copy [all] [idx]
+copy|cp [all] [idx]
   复制磁力链接
 tree [new] [idx]
   以树的形式显示，使用参数 new 只显示新项目 适用于：主页，番剧
-refresh [idx]
+refresh|rf [idx]
   重新过滤整理剧集 适用于：主页，番剧
-qupdate [all]
-  快速更新番剧 适用于：主页
-update [all]  [idx]
+updateq|upq [all] [opt]
+  opt:
+    -k key1 key2 ...
+  使用参数 k 可附加关键词 快速更新番剧 适用于：主页
+update|up [all]  [idx]
   更新番剧列表 适用于：主页，番剧
-download [all] [idx]
+download|dl [all] [idx]
   下载种子文件
-qsearch [key] [opt]
-  [opt]:
+searchq|schq [key] [opt]
+  opt:
     -i idx1,idx2,...
     --index=idx1,idx2,...
-  快速替换剧集 适用于：主页
-search 替换剧集
+  快速替换剧集 使用 index 参数可搜索特定剧集 适用于：主页
+search|sch 替换剧集
   search idx
      适用于：主页
   search [key] [opt]
-     [opt]:
+     opt:
        -i idx1,idx2,...
        --index=idx1,idx2,...
-     适用于：番剧
-f [idx]
+     使用 index 参数可搜索特定剧集 适用于：番剧
+f [all] [idx]
   更新下载一条龙 适用于：主页，番剧
-fq
-  快速自动更新下载 适用于：主页
+fq [all] [opt]
+  opt:
+    -k key1 key2 ...
+  快速自动更新下载 使用参数 k 可附加关键词 适用于：主页
 add name|regex
   添加子项目 在主页中为添加番剧，在番剧中为添加过滤器 适用于：主页，番剧
-help
+help|h
   帮助
 
 中括号[]中的是非必要内容，不带[]的是必要内容
@@ -1435,11 +1465,29 @@ def parse_paras(s:str):
 def extract_paras(s:str,key=''):
     ps = s.split()
     p=None
+    switch=False
     for k in ps:
-        if k.isdecimal():
+        if p is None and k.isdecimal():
             p=int(k)
+        elif k==key:
+            switch=True
+        else:
+            print(f'未知参数: {k}')
+    return switch, p
+
+def extract_keys(s:str):
+    ps = s.split()
+    start=0
+    filt=True
+    for i,k in enumerate(ps):
+        if k=='all':
+            filt=False
+        elif k=='-k':
+            start=i+1
             break
-    return key in ps, p
+        else:
+            print(f'未知参数: {k}')
+    return ps[start:] if start > 0 else None, filt
 
 index=[[],None]
 
@@ -1454,87 +1502,91 @@ except Exception:
 
 while True:
     try:
-        command,paras  = parse_paras(input('>>>'))
+        command,paras  = parse_paras(input('>>> '))
         match command:
-            case 'exit':
+            case 'exit'|'quit'|'q':
                 break
-            case 'select'|'open':
+            case 'cls':
+                os.system('cls')
+            case 'select'|'sl'|'open'|'opn':
                 p1,p2=extract_paras(paras)
                 if p2 is not None:
                     try:
-                        select(p2, command == 'open')
+                        select(p2, command in ('open','opn'))
                     except Exception:
                         print('请使用正确的序号')
                 else:
                     print('请搭配序号使用')
-            case 'back':
+            case 'back'|'bk':
                 back()
-            case 'home':
+            case 'home'|'hm':
                 init()
-            case 'current':
+            case 'current'|'cwd':
                 showselected()
             case 'show':
                 showitem(extract_paras(paras)[1])
-            case 'list':
+            case 'list'|'ls':
                 showlist(extract_paras(paras)[1])
-            case 'detail':
+            case 'detail'|'dt':
                 showdetail(extract_paras(paras)[1])
             case 'enum':
                 enumepisode(extract_paras(paras)[1])
-            case 'setname':
+            case 'setname'|'name'|'nm':
                 if paras:
                     setname(paras)
                 else:
                     print('未设置名称')
-            case 'setkeys':
+            case 'setkeys'|'keys'|'ks':
                 if paras:
                     setkeys(paras)
                 else:
                     print('未设置关键词')
-            case 'listrss':
+            case 'listrss'|'lr':
                 listRSS()
-            case 'setrss':
+            case 'setrss'|'sr':
                 p1,p2=extract_paras(paras)
                 if p2 is not None:
                     setRSS(p2)
                 else:
                     print('未设置RSS')
-            case 'showrss':
+            case 'showrss'|'rss':
                 showRSS()
-            case 'save':
+            case 'save'|'s':
                 save()
-            case 'export':
+            case 'export'|'p':
                 export()
-            case 'mark':
+            case 'mark'|'mk':
                 if paras in ('new','old'):
                     turn_all(paras)
                 elif paras in ('updating','end','abandoned','pause'):
                     setstatus(paras)
                 else:
                     print('在番剧中，使用 updating|end|abandoned|pause 设置番剧状态，在任意地方使用 old|new 标记所有包含剧集的新旧')
-            case 'copy':
+            case 'copy'|'cp':
                 p1,p2=extract_paras(paras,'all')
                 copy_all(not p1, p2)
             case 'tree':
                 p1,p2=extract_paras(paras,'new')
                 tree(p1,p2)
-            case 'refresh':
+            case 'refresh'|'rf':
                 refresh(extract_paras(paras)[1])
-            case 'qupdate':
-                p1,p2=extract_paras(paras,'all')
-                quick_update(not p1, p2)
-            case 'update':
+            case 'updateq'|'upq':
+                quick_update(*extract_keys(paras))
+            case 'update'|'up':
                 p1,p2=extract_paras(paras,'all')
                 update_all(not p1, p2)
-            case 'download':
+            case 'download'|'dl':
                 p1,p2=extract_paras(paras,'all')
                 download_all(not p1, p2)
-            case 'qsearch':
+            case 'searchq'|'schq':
                 quick_search(paras)
-            case 'search':
+            case 'search'|'sch':
                 search(paras)
-            case 'f'|'fq':
-                auto_download(extract_paras(paras)[1], command=='fq')
+            case 'fq':
+                auto_download_quick(*extract_keys(paras))
+            case 'f':
+                p1,p2=extract_paras(paras,'all')
+                auto_download(not p1, p2)
             case 'add':
                 if paras:
                     layer = selected()[0]
@@ -1546,10 +1598,10 @@ while True:
                         print('本命令只作用于主页和番剧，主页中添加番剧，番剧中添加过滤器')
                 else:
                     print('请搭配添加内容使用，例如：add 憧憬成为魔法少女')
-            case 'help':
+            case 'help'|'h':
                 doc()
             case _:
-                print('请输入命令，或使用 help 命令查看所有命令')
+                print('请输入命令，或使用 help|h 命令查看所有命令')
     except KeyboardInterrupt:
         print('操作被用户中断')
     except UserError:
