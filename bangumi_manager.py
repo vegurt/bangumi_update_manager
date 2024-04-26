@@ -901,7 +901,7 @@ class bangumiset:
             else:
                 return 6
         def statusvalue(ep):
-            code_order=(0,1,2,3,5,6,4)
+            code_order=(0,1,2,3,5,4,6)
             status = [status_single(ep,bm) for bm in self]
             return min(status,key=lambda i:code_order.index(i)) if status else 6
         status = [statusvalue(ep) for ep in tochoose]
