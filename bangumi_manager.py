@@ -406,7 +406,7 @@ class bangumi:
         return res
 
     def isavailable(self):
-        return self.name and self.patterns[0]
+        return bool(self.patterns[0])
 
     def isupdatable(self,filt=True):
         return self.isavailable() and (not filt or self.status == 'updating')
@@ -415,10 +415,33 @@ class bangumi:
         self.contains.clear()
         self.contains['unrecognized']=[]
 
-    def refresh(self):
+    def refresh(self,filt_keys=False):
         tmp = bangumi('ep_station',self.keys,self.patterns)
-        tmp.add_list(self.tolist())
+        tmp.add_list_expert(self.tolist(),filt_keys=filt_keys)
         self.contains=tmp.contains
+
+    def possible_index(self,index:int|float,istd=True):
+        # istd 输入序号是否为常规编号（从1或0开始算起的）
+        def _trans(i,start,istd):
+            if start>0:
+                if istd:
+                    return start+i-1
+                else:
+                    return i-start+1
+            else:
+                return i
+        if self.patterns[0]:
+            res=[_trans(index,i,istd) for p,i in self.patterns[0]]
+        else:
+            res=[index]
+        res = [int(i) if int(i)==i else round(i,2) for i in res]
+        return sorted(list(set(res)))
+        
+    def possible_index_list(self,index:list[int|float],istd=True):
+        res = []
+        for i in index:
+            res.extend(self.possible_index(i,istd))
+        return sorted(list(set(res)))
 
     def find(self,key=''):
         keys=self.keys[:]
@@ -430,17 +453,8 @@ class bangumi:
         searcher.update()
         return searcher.tolist()
 
-    def findindex(self,index:list[int|float],key=''):
-        if self.patterns[0]:
-            keys=[i+j-1 if i>0 else j for j in index for p,i in self.patterns[0]]
-        else:
-            keys=index
-        keys = [int(i) if int(i)==i else round(i,2) for i in keys]
-        keys=sorted(list(set(keys)))
-        keys=[str(i).rjust(2,'0') for i in keys]
-        _key = key.split()
-        keys = [' '.join(_key+[i]) for i in keys]
-        print(f'共 {len(keys)} 个搜索任务')
+    def find_list(self, key_list:list[str], key=''):
+        keys=[' '.join(key.split()+i.split()) for i in key_list]
         res=[]
         for k in keys:
             for ep in self.find(k):
@@ -448,7 +462,27 @@ class bangumi:
                     res.append(ep)
         res.sort(key=lambda ep:ep.date,reverse=True)
         return res
+
+    def findindex(self,index:list[int|float],key=''):
+        keys = self.possible_index_list(index)
+        keys=[str(i).rjust(2,'0') for i in keys]
+        print(f'共 {len(keys)} 个搜索任务')
+        return self.find_list(keys,key)
     
+    def find_expert(self,key='',key_list:list[str]|None=None,index:list[int|float]|None=None):
+        if not key_list and not index:
+            return self.find(key)
+        elif key_list and not index:
+            print(f'共 {len(key_list)} 个搜索任务')
+            return self.find_list(key_list,key)
+        elif not key_list and index:
+            return self.findindex(index,key)
+        else:
+            index = [str(i).rjust(2,'0') for i in self.possible_index_list(index)]
+            keys = [' '.join(k.split()+[i]) for k in key_list for i in index]
+            print(f'共 {len(keys)} 个搜索任务')
+            return self.find_list(keys,key)
+
     def find_advanced(self,key=''):
         _keys = key.split()
         start,end=0,len(_keys)
@@ -459,7 +493,7 @@ class bangumi:
             for i in s:
                 num = re.match(r'^[+-]?\d+\.?\d*$',i)
                 if num is not None:
-                    num=float(num.group())
+                    num=float(i)
                     res.append(int(num) if int(num) == num else num)
                 else:
                     return
@@ -495,7 +529,7 @@ class bangumi:
         tmp.addpattern('.*')
         tmp.add_list(eps)
         eps = tmp.tolist()
-        status = [self.indexofepisode(ep)[1] for ep in eps]
+        status = [self.status_of_episode(ep) for ep in eps]
         return list(zip(status,eps))
 
     @staticmethod
@@ -549,13 +583,13 @@ class bangumi:
                 return chosen
         return []
 
-    def search(self,key:str):
+    def search(self,key:str=''):
         key=key.strip()
         tochoose=self.find_advanced(key)
         chosen = self.choose(self.packeps(tochoose))
         if chosen:
-            method = input('\na. 添加\nb. 下载\nc. 全部\nd. 取消\n选择需要的操作: ').strip().lower()
-            if method in ('a','c'):
+            method = input('\na. 添加\nb. 下载\nc. 全部\nd. 取消\n选择需要的操作（默认添加）: ').strip().lower()
+            if method in ('a','c',''):
                 self.add_list(chosen,True)
                 for ep in chosen:
                     print(f'\n已处理:\n{ep.name}')
@@ -698,6 +732,9 @@ class bangumi:
         for ep in self.tolist():
             ep.turnold()
 
+    def status_of_episode(self,ep:episode,filt_keys=False):
+        return self.indexofepisode(ep,filt_keys)[1]
+        
     @staticmethod
     def indexofepisode_singlepattern(ep,pattern):
         p,i = pattern
@@ -716,14 +753,20 @@ class bangumi:
             status=3
         return index,status
             
-    def indexofepisode(self,ep):
+    def indexofepisode(self,ep,filt_keys=False):
         '''\
+        6: 关键词不匹配
+        5: 番剧还没添加正向过滤器
         4: 被反向过滤器排除
         3: 未通过筛选
         2: 筛选通过，但未找到剧集编号
         1: 通过筛选，但编号不对
         0: 通过筛选找到了正确的剧集编号
         '''
+        if filt_keys and not self.match_episode(ep):
+            return 0,6
+        if not self.isavailable():
+            return 0,5
         if self.is_excluded_episode(ep):
             return 0,4
         index,status = 0,3
@@ -736,11 +779,12 @@ class bangumi:
         return index,status
 
 
-    def _add_episode(self,ep:episode,index:int|float|None,cover=False):
+    def _add_episode(self,ep:episode,index:int|float|None,cover=False,reset=True):
         if index is None:
             for i,tep in enumerate(self.contains['unrecognized']):
                 if tep.isSameResource(ep):
                     if cover and tep != ep:
+                        ep.isnew = True if reset else self.contains['unrecognized'][i].isnew
                         self.contains['unrecognized'][i]=ep
                     break
             else:
@@ -748,6 +792,7 @@ class bangumi:
         else:
             if cover:
                 if self.contains.get(index) != ep:
+                    ep.isnew = True if reset or self.contains.get(index) is None else self.contains[index].isnew
                     self.contains[index]=ep
             else:
                 self.contains.setdefault(index,ep)
@@ -755,13 +800,13 @@ class bangumi:
     def is_excluded_episode(self,ep:episode):
         return any(re.search(p,ep.name) for p in self.patterns[1])
 
-    def add(self,ep:episode,cover=False):
+    def add(self,ep:episode,cover=False,reset=True):
         if not self.is_excluded_episode(ep):
             index,status = self.indexofepisode(ep)
             if status in (0,2):
-                self._add_episode(ep,index if status==0 else None,cover)
+                self._add_episode(ep,index if status==0 else None,cover,reset)
 
-    def add_list(self,eps:list[episode],cover=False):
+    def add_list(self,eps:list[episode],cover=False,reset=True):
         toadd = [ep for ep in eps if not self.is_excluded_episode(ep)]
         tmp = bangumi('temp_list',self.keys,self.patterns)
         flags = [True]*len(toadd)
@@ -775,9 +820,18 @@ class bangumi:
                         flags[i]=False
         for i,ep in tmp.contains.items():
             if isinstance(i,(int,float)):
-                self._add_episode(ep,i,cover)
+                self._add_episode(ep,i,cover,reset)
         for ep in tmp.contains['unrecognized']:
-            self._add_episode(ep,None,cover)
+            self._add_episode(ep,None,cover,reset)
+
+    def add_list_keys_matched(self,eps:list[episode],cover=False,reset=True):
+        self.add_list(self.match_list(eps),cover,reset)
+
+    def add_list_expert(self,eps:list[episode],cover=False,reset=True,filt_keys=True):
+        if filt_keys:
+            self.add_list_keys_matched(eps,cover,reset)
+        else:
+            self.add_list(eps,cover,reset)
 
     def match_episode(self,ep:episode):
         # 不区分大小写与简繁字体
@@ -807,10 +861,9 @@ class bangumi:
                 begin=1
                 high_priority=True
                 if direction:
-                    begin = input('起始序号(请输入一个整数，默认为1)：').strip()
-                    p=re.match(r'^[+-]?\d+\.?\d*$',begin)
-                    if p is not None:
-                        begin = round(float(p.group()))
+                    _begin = input('起始序号(请输入一个整数，默认为1)：').strip()
+                    if re.match(r'^[+-]?\d+\.?\d*$',_begin):
+                        begin = round(float(_begin))
                     high_priority = input('是否添加为最高优先级（默认是）[Y/n]').lower() not in ('n','no')
                 self.addpattern(regex,begin,direction,high_priority)
             return True
@@ -875,10 +928,10 @@ class bangumiset:
             tmp.addpattern('.*')
         return tmp
 
-    def quick_add_list(self,eps,filt=True,cover=False):
+    def quick_add_list(self,eps,filt=True,cover=False,reset=True):
         for bm in self:
             if bm.isupdatable(filt):
-                bm.add_list(bm.match_list(eps),cover)
+                bm.add_list_keys_matched(eps,cover,reset)
 
     def quick_update(self, keys=None, filt=True):
         tmp = self.searcher(keys)
@@ -887,34 +940,132 @@ class bangumiset:
         tmp.update()
         self.quick_add_list(tmp.tolist(),filt)
 
-    def quick_search(self,key:str,filt=False):
+    def status_of_episode(self,ep:episode,filt=True):
+        code_order=(0,1,2,3,5,4,6)
+        status = [bm.status_of_episode(ep,True) for bm in self if not filt or bm.status=='updating']
+        return min(status,key=lambda i:code_order.index(i)) if status else 6
+        
+
+    def quick_search(self,key:str='',filt=False):
         key=key.strip()
         tmp = self.searcher(activate=False)
         tochoose=tmp.find_advanced(key)
         bms = [bm for bm in self if bm.isupdatable(filt)]
-        def status_single(ep:episode,bm:bangumi):
-            if bm.match_episode(ep):
-                if bm.isavailable():
-                    return bm.indexofepisode(ep)[1]
-                else:
-                    return 5
-            else:
-                return 6
-        def statusvalue(ep):
-            code_order=(0,1,2,3,5,4,6)
-            status = [status_single(ep,bm) for bm in self]
-            return min(status,key=lambda i:code_order.index(i)) if status else 6
-        status = [statusvalue(ep) for ep in tochoose]
+        status = [self.status_of_episode(ep,filt) for ep in tochoose]
         toadd = tmp.choose(list(zip(status,tochoose)))
         if toadd:
-            method = input('\na. 添加\nb. 下载\nc. 全部\nd. 取消\n选择需要的操作: ').strip().lower()
-            if method in ('a','c'):
+            method = input('\na. 添加\nb. 下载\nc. 全部\nd. 取消\n选择需要的操作（默认添加）: ').strip().lower()
+            if method in ('a','c',''):
                 self.quick_add_list(toadd,filt,True)
                 for bm in bms:
                     for ep in bm.match_list(toadd):
                         print(f'\n{bm.name} 已处理:\n{ep.name}')
             if method in ('b','c'):
                 bangumi.downloadlist(toadd)
+
+    def expert_search(self,
+                      key='',
+                      finder:bangumi|None=None,
+                      index:list[int|float]=None,
+                      key_list:list[str]=None,
+                      container:bangumi|None=None,
+                      filt=True,
+                      cover=False,
+                      reset=True,
+                      filt_keys=False,
+                      ifchoose=False
+                      ):
+
+        finder = finder if finder is not None else self.searcher(activate=False)
+        toadd = finder.find_expert(key,key_list,index)
+        
+        if toadd:
+            while True:
+                t = lambda container: container.name if container is not None else '主页'
+                opt = input(f'\n确认更新：{t(container)}（要改变，输入序号，或 home）').strip().lower()
+                if opt:
+                    if opt == 'home':
+                        container = None
+                    elif opt.isdecimal():
+                        i = int(opt)-1
+                        maxnum = len(self)
+                        if 0<=i<maxnum:
+                            container = self[i]
+                        else:
+                            print(f'只有 {maxnum} 个番剧')
+                    else:
+                        print(f'未知参数')
+                print(f'搜索结果将添加到：{t(container)}')
+
+                t = lambda filt:'只添加到正在更新状态下的番剧' if filt else '无视番剧状态是否为正在更新'
+                filt = bool(filt) ^ (input(f'\n确认：{t(filt)}[Y/n]').lower() in ('n','no'))
+                print(f'将{t(filt)}')
+
+                if container is not None and not container.isupdatable(filt):
+                    print('\n警告：该番剧无法更新，请检查番剧状态或是否已添加正向过滤器')
+                    opt = input('\na. 继续\nb. 重选\nc. 退出\n请选择需要的操作（默认继续）:').strip().lower()
+                    match opt:
+                        case 'a'|'':
+                            break
+                        case 'b':
+                            continue
+                        case 'c':
+                            return
+                        case _:
+                            return
+                else:
+                    break
+
+            if container is not None:
+                t = lambda filt_keys:'使用番剧关键词重新筛选剧集' if filt_keys else '直接添加所有剧集'
+                filt_keys = bool(filt_keys) ^ (input(f'\n确认：{t(filt_keys)}[Y/n]').lower() in ('n','no'))
+                print(f'将{t(filt_keys)}')
+
+            if ifchoose:
+                if container is not None:
+                    status = [container.status_of_episode(ep,filt_keys) for ep in toadd]
+                else:
+                    status = [self.status_of_episode(ep,filt) for ep in toadd]
+                toadd = bangumi.choose(list(zip(status,toadd)))
+                if toadd:
+                    method = input('\na. 添加\nb. 下载\nc. 全部\nd. 取消\n选择需要的操作（默认添加）: ').strip().lower()
+                    if method in ('','a','b','c','d'):
+                        if method in ('b','c'):
+                            bangumi.downloadlist(toadd)
+                        if method in ('b','d'):
+                            return
+                    else:
+                        return
+                else:
+                    return
+                    
+            if toadd:
+                t = lambda cover:'覆盖相似剧集' if cover else '只添加新剧集'
+                cover = bool(cover) ^ (input(f'\n确认：{t(cover)}[Y/n]').lower() in ('n','no'))
+                print(f'将{t(cover)}')
+
+                if cover:
+                    t = lambda reset:'覆盖时重置剧集新旧' if reset else '覆盖时保留剧集新旧状态'
+                    reset = bool(reset) ^ (input(f'\n确认：{t(reset)}[Y/n]').lower() in ('n','no'))
+                    print(f'将{t(reset)}')
+                
+                if container is not None:
+                    if container.isupdatable(filt):
+                        container.add_list_expert(toadd,cover,reset,filt_keys)
+                    tmp=[ep for ep in container if ep.isnew]
+                else:
+                    self.quick_add_list(toadd,filt,cover,reset)
+                    tmp=[]
+                    for bm in self:
+                        tmp.extend([ep for ep in bm if ep.isnew])
+                if tmp:
+                    if input(f'发现 {len(tmp)} 个新项目，是否立即下载？[Y/n]').lower() not in ('n','no'):
+                        bangumi.downloadlist(tmp)
+                else:
+                    print('未发现新项目')
+        else:
+            print('未发现项目')
+                
 
     def tolist(self):
         return self.contains
@@ -1133,7 +1284,7 @@ def tree(filt=True,num=None):
     else:
         print('本命令只作用于主页和番剧')
 
-def refresh(num=None):
+def refresh(filt_keys=False,num=None):
     layer,target=selected(num)
     toprocess=[]
     if layer == 0:
@@ -1145,7 +1296,7 @@ def refresh(num=None):
         return
     toprocess=[bm for bm in toprocess if bm.isavailable()]
     for bm in toprocess:
-        bm.refresh()
+        bm.refresh(filt_keys)
     
 def quick_update(keys=None,filt=True):
     layer,target=selected()
@@ -1233,6 +1384,84 @@ def add_pattern(pattern):
         target.add_pattern_interact(pattern)
     else:
         print('先选择一个番剧，而不是主页或剧集，再添加过滤器')
+
+def extract_paras_expert(s:str):
+    paras = s.split()
+    res=['',None,[],[],None,True,False,True,False,False]
+    pos = [None]*9
+    for i,p in enumerate(paras):
+        match p:
+            case '-k':
+                if pos[0] is None:
+                    pos[0]=i
+                    if i+1<len(paras) and paras[i+1].isdecimal():
+                        t=int(paras[i+1])-1
+                        res[1]=t
+            case '-i':
+                if pos[1] is None:
+                    pos[1]=i
+                    if i+1<len(paras):
+                        res[2]=[float(i) for i in paras[i+1].split(',') if re.match(r'^[+-]?\d+\.?\d*$',i)]
+            case '-o':
+                if pos[2] is None:
+                    pos[2]=i
+                    if i+1<len(paras) and paras[i+1].isdecimal():
+                        t=int(paras[i+1])-1
+                        res[4]=t
+            case '--force':
+                if pos[3] is None:
+                    pos[3]=i
+                    res[5]=False
+            case '--cover':
+                if pos[4] is None:
+                    pos[4]=i
+                    res[6]=True
+            case '--no-reset':
+                if pos[5] is None:
+                    pos[5]=i
+                    res[7]=False
+            case '--enable-keys':
+                if pos[6] is None:
+                    pos[6]=i
+                    res[8]=True
+            case '--choose':
+                if pos[7] is None:
+                    pos[7]=i
+                    res[9]=True
+            case '-a':
+                pos[8]=i
+                break
+    tmp=[i for i in pos if i is not None]
+    res[0]=' '.join(paras[0:min(tmp)] if tmp else paras)
+    if pos[8] is not None:
+        keys=[]
+        for k in paras[pos[8]:]:
+            if k=='-a':
+                if keys:
+                    res[3].append(' '.join(keys))
+                keys.clear()
+            else:
+                keys.append(k)
+        if keys:
+            res[3].append(' '.join(keys))
+    return res
+
+def expert_search(key):
+    layer,target=selected()
+    if layer<=1:
+        paras=extract_paras_expert(key)
+        maxnum=len(sourcedata)
+        for i in (1,4):
+            if paras[i] is not None and 0<=paras[i]<maxnum:
+                paras[i] = sourcedata[paras[i]]
+            elif layer == 1:
+                paras[i] = target
+            else:
+                paras[i] = None
+        sourcedata.expert_search(*paras)
+    else:
+        print('剧集不存在搜索操作')
+    
 
 def quick_search(key):
     layer,target=selected()
@@ -1370,20 +1599,41 @@ export|p
 mark|mk old|new|updating|end|abandoned|pause
   old|new 标记新旧
   updating|end|abandoned|pause 设置番剧状态 适用于：番剧
-copy|cp [all] [idx]
+copy|cp [--force] [idx]
   复制磁力链接
-tree [new] [idx]
+tree [--new] [idx]
   以树的形式显示，使用参数 new 只显示新项目 适用于：主页，番剧
-refresh|rf [idx]
+refresh|rf [--deep] [idx]
   重新过滤整理剧集 适用于：主页，番剧
-updateq|upq [all] [opt]
+updateq|upq [--force] [opt]
   opt:
     -k key1 key2 ...
   使用参数 k 可附加关键词 快速更新番剧 适用于：主页
-update|up [all]  [idx]
+update|up [--force]  [idx]
   更新番剧列表 适用于：主页，番剧
-download|dl [all] [idx]
+download|dl [--force] [idx]
   下载种子文件
+searche|sche [key] [opt1] [opt2] ... 高级搜索更新
+  opt:
+    -k idx
+          从番剧获取关键词 默认：活动项
+    -i idx1,idx2,...
+          集数 支持多个
+    -a key1_1 key1_2 ... -a key2_1 key2_2 ... -a ...
+          附加关键词 支持多个 必须写在最后面
+    -o idx
+          添加到哪个番剧 默认：活动项
+    --force
+          不考虑番剧状态
+    --cover
+          当存在相同剧集，但来源、制作组、字幕类型、压制参数等不完全相同时，覆盖剧集
+    --no-reset
+          覆盖剧集时不重置为新项目 仅 --cover 存在时有效
+    --enable-keys
+          添加番剧时是否自动查找匹配关键词的剧集
+          仅添加到单个番剧时有效，添加到主页必须过滤关键词
+    --choose
+          自行从搜索结果中挑选剧集
 searchq|schq [key] [opt]
   opt:
     -i idx1,idx2,...
@@ -1397,9 +1647,9 @@ search|sch 替换剧集
        -i idx1,idx2,...
        --index=idx1,idx2,...
      使用 index 参数可搜索特定剧集 适用于：番剧
-f [all] [idx]
+f [--force] [idx]
   更新下载一条龙 适用于：主页，番剧
-fq [all] [opt]
+fq [--force] [opt]
   opt:
     -k key1 key2 ...
   快速自动更新下载 使用参数 k 可附加关键词 适用于：主页
@@ -1485,7 +1735,7 @@ def extract_keys(s:str):
     start=0
     filt=True
     for i,k in enumerate(ps):
-        if k=='all':
+        if k=='--force':
             filt=False
         elif k=='-k':
             start=i+1
@@ -1568,21 +1818,23 @@ while True:
                 else:
                     print('在番剧中，使用 updating|end|abandoned|pause 设置番剧状态，在任意地方使用 old|new 标记所有包含剧集的新旧')
             case 'copy'|'cp':
-                p1,p2=extract_paras(paras,'all')
+                p1,p2=extract_paras(paras,'--force')
                 copy_all(not p1, p2)
             case 'tree':
-                p1,p2=extract_paras(paras,'new')
+                p1,p2=extract_paras(paras,'--new')
                 tree(p1,p2)
             case 'refresh'|'rf':
-                refresh(extract_paras(paras)[1])
+                refresh(*extract_paras(paras,'--deep'))
             case 'updateq'|'upq':
                 quick_update(*extract_keys(paras))
             case 'update'|'up':
-                p1,p2=extract_paras(paras,'all')
+                p1,p2=extract_paras(paras,'--force')
                 update_all(not p1, p2)
             case 'download'|'dl':
-                p1,p2=extract_paras(paras,'all')
+                p1,p2=extract_paras(paras,'--force')
                 download_all(not p1, p2)
+            case 'searche'|'sche':
+                expert_search(paras)
             case 'searchq'|'schq':
                 quick_search(paras)
             case 'search'|'sch':
@@ -1590,7 +1842,7 @@ while True:
             case 'fq':
                 auto_download_quick(*extract_keys(paras))
             case 'f':
-                p1,p2=extract_paras(paras,'all')
+                p1,p2=extract_paras(paras,'--force')
                 auto_download(not p1, p2)
             case 'add':
                 if paras:
