@@ -736,11 +736,24 @@ class bangumi:
         return self.indexofepisode(ep,filt_keys)[1]
         
     @staticmethod
+    def extract_pattern(re_pattern):
+        return re.compile(re.sub(r'\{[A-Za-z]*?\}',r'([+-]?\\d+\\.?\\d*)',re_pattern))
+    
+    @staticmethod
+    def isavailable_regex(re_pattern):
+        try:
+            bangumi.extract_pattern(re_pattern)
+        except re.error:
+            return False
+        else:
+            return True
+
+    @staticmethod
     def indexofepisode_singlepattern(ep,pattern):
         p,i = pattern
         index = 0
         p=re.sub(r'\{[A-Za-z]*?\}',r'([+-]?\\d+\\.?\\d*)',p)
-        tmp = re.search(p,ep.name)
+        tmp = bangumi.extract_pattern(p).search(ep.name)
         if tmp is not None:
             res=tmp.groups()
             if res and re.match(r'^[+-]?\d+\.?\d*$',res[0]):
@@ -855,17 +868,20 @@ class bangumi:
         regex = pattern if pattern else input('\n请输入过滤器（不输入任何内容直接按回车取消本次添加）: \n')
         regex = regex.strip()
         if regex:
-            direction = input('是否为正向过滤器？（默认为正）[Y/n]').lower() not in ('n','no')
-            if regex not in (p for p,i in self.patterns[0]) if direction else self.patterns[1] or \
-                   input('过滤器已存在，是否继续？（默认否）[y/N]').lower() in ('y','yes'):
-                begin=1
-                high_priority=True
-                if direction:
-                    _begin = input('起始序号(请输入一个整数，默认为1)：').strip()
-                    if re.match(r'^[+-]?\d+\.?\d*$',_begin):
-                        begin = round(float(_begin))
-                    high_priority = input('是否添加为最高优先级（默认是）[Y/n]').lower() not in ('n','no')
-                self.addpattern(regex,begin,direction,high_priority)
+            if self.isavailable_regex(regex):
+                direction = input('是否为正向过滤器？（默认为正）[Y/n]').lower() not in ('n','no')
+                if (regex not in ((p for p,i in self.patterns[0]) if direction else self.patterns[1])) or \
+                    (input('过滤器已存在，是否继续？（默认否）[y/N]').lower() in ('y','yes')):
+                    begin=1
+                    high_priority=True
+                    if direction:
+                        _begin = input('起始序号(请输入一个整数，默认为1)：').strip()
+                        if re.match(r'^[+-]?\d+\.?\d*$',_begin):
+                            begin = round(float(_begin))
+                        high_priority = input('是否添加为最高优先级（默认是）[Y/n]').lower() not in ('n','no')
+                    self.addpattern(regex,begin,direction,high_priority)
+            else:
+                print('过滤器不合法')
             return True
 
 
