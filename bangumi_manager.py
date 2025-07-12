@@ -22,6 +22,15 @@ def download(url):
     res.close()
     return res
 
+def save_data(path,data,mode='wb',encoding=None):
+    try:
+        with open(path,mode,encoding=encoding) as f:
+            f.write(data)
+    except Exception as e:
+        print(e)
+        print('保存文件失败，尝试重新保存...')
+        save_data(path,data,mode='wb',encoding=None)
+
 class UserError(Exception):...
 
 class RssGenerator:
@@ -384,8 +393,7 @@ class episode:
                     fullpath=os.path.join(pathname,f'{name} {i}.torrent')
                     if not os.path.exists(fullpath):
                         break
-            with open(fullpath,'wb') as f:
-                f.write(res)
+            save_data(fullpath,res)
             self.turn_old()
             print('成功！！')
             return res
@@ -1702,8 +1710,7 @@ def export():
     filename = getFilename()
     if filename:
         path = filename+'.html'
-        with open(path,'wt',encoding='utf8') as f:
-            f.write(sourcedata.html)
+        save_data(path,sourcedata.html,'wt',encoding='utf8')
         print(f'已保存到：{os.path.abspath(path)}')
 
 def save():
@@ -1716,8 +1723,7 @@ def save():
             path+='.xml'
     if path:
         path=os.path.abspath(path)
-        with open(path,'wb') as f:
-            f.write(etree.tostring(sourcedata.xml,pretty_print=True,encoding='utf8'))
+        save_data(path,etree.tostring(sourcedata.xml,pretty_print=True,encoding='utf8'))
         filepath=path
 
 def auto_save():
@@ -1776,6 +1782,7 @@ while True:
         command,paras  = parse_paras(input('>>> '))
         match command:
             case 'exit'|'quit'|'q':
+                auto_save()
                 break
             case 'cls':
                 os.system('cls')
@@ -1886,5 +1893,5 @@ while True:
         for bm in sourcedata:
             if bm.isavailable():
                 bm.refresh()
-        auto_save()
+        # auto_save()
 
